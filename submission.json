@@ -4,7 +4,7 @@
     {"name": "Hadi Hassan", "email": "hadihassan04@gmail.com"}
   ],
   "repo": "https://github.com/hadihassan04/build-the-builder",
-  "commit": "REPLACE_WITH_git_rev_parse_HEAD",
+  "commit": "FILL_AFTER_FINAL_RUN",
   "run_command": "python3 builder/build.py {case_folder} {mock_url}",
   "workflow": "submission/final.workflow.json",
   "trace": "traces/final.log",
