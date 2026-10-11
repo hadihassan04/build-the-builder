@@ -32,8 +32,8 @@ traces/*
 # Final case materials (do not bake into the builder)
 FreyaBank-*/
 *-Ekstre-*/
-final-case/
-case/
+/final-case/
+/case/
 
 # Cloudflare Wrangler
 mock/.wrangler/
@@ -42,3 +42,6 @@ mock/dist/
 
 # Optional large local datasets
 synthetic-test-set.json
+
+# Final-case live test personas (workspace-specific)
+.final-personas.json

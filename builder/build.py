@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Build a Freya phone agent from brief files.
+"""Build a Freya phone agent from brief files (practice) or from a case folder (final).
 
     python3 builder/build.py briefs/brief-a.md briefs/brief-b.md
     python3 builder/build.py briefs/brief-a.md --slot brief-a --test
+    python3 builder/build.py <case_folder> <mock_url>            # final-case mode (see builder/build_case.py)
 """
 from __future__ import annotations
 
@@ -141,6 +142,28 @@ def build(
 
 
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    # Final-case mode: first positional is a case FOLDER (optionally followed by the mock URL).
+    if argv and os.path.isdir(argv[0]):
+        from builder.build_case import build_case
+        fp = argparse.ArgumentParser(description="Build a phone agent from a case folder")
+        fp.add_argument("case_folder")
+        fp.add_argument("mock_url", nargs="?", default=os.environ.get("MOCK_URL"))
+        fp.add_argument("--slot", default="final")
+        fp.add_argument("--out", type=Path, default=ROOT / "out")
+        fp.add_argument("--no-deploy-mock", action="store_true")
+        fp.add_argument("--skip-save", action="store_true")
+        fp.add_argument("--live-test", action="store_true", help="Run simulated calls against the saved agent")
+        fp.add_argument("--export", type=Path, default=ROOT / "submission" / "final.workflow.json")
+        fp.add_argument("--trace-copy", type=Path, default=ROOT / "traces" / "final.log")
+        fp.add_argument("--policy", type=Path, help="Reuse a case policy from an earlier run (skips the model call)")
+        a = fp.parse_args(argv)
+        t0 = time.time()
+        res = build_case(a.case_folder, a.mock_url, slot=a.slot, out_dir=a.out, deploy_mock=not a.no_deploy_mock,
+                         skip_save=a.skip_save, export_path=a.export, live_test=a.live_test, trace_copy=a.trace_copy, policy_path_in=a.policy)
+        print(f"done in {time.time() - t0:.1f}s")
+        print(json.dumps({k: res.get(k) for k in ("workflow_id", "agent_id", "workflow_path", "export_path", "trace", "trace_copy", "mock_tests", "offline_tests")}, indent=2))
+        return 0
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("briefs", nargs="+", help="Brief markdown files")
     ap.add_argument("--slot", help="Freya save_workflow slot (default: first brief stem)")

@@ -9,7 +9,7 @@
     "source_ids": ["brief-a-manual"]
   },
   "opening": {
-    "first_sentence_template": "Hello, this is Freya Bank's digital assistant. This call is recorded.",
+    "first_sentence_template": "Hello, this is Freya Bank's digital assistant. Please note that we are recording this call.",
     "identity_ask_template": "Am I speaking with {{title}} {{last_name}}?",
     "confirm_phrases": ["yes", "that's me", "speaking", "own_name"],
     "forbidden_before_verify": ["collections", "debt", "payment", "credit card", "loan", "past due", "overdue"],
@@ -125,8 +125,8 @@
       {"id": "deceased", "description": "Customer has died"},
       {"id": "callback_offer", "description": "Offers a time when the customer can be reached"},
       {"id": "pays_today", "description": "Can pay the full amount today"},
-      {"id": "vague_period", "description": "Names a vague period without an exact calendar day (week after next, end of the month, when my salary, next week, sometime next month)"},
-      {"id": "proposes_date", "description": "Names a specific payment date or weekday (not a vague period)"},
+      {"id": "vague_period", "description": "Names a vague period without an exact calendar day (week after next, end of the month, when my salary, next week, sometime next month). Prefer this over proposes_date whenever those phrases appear, even if a date could be guessed."},
+      {"id": "proposes_date", "description": "Names a specific payment date or weekday (the 26th, Monday, this Friday, 30 October). Do NOT use for vague periods like week after next or end of the month."},
       {"id": "proposes_amount", "description": "Names a payment amount"},
       {"id": "full_too_much", "description": "Full past-due amount is too much"},
       {"id": "refuses", "description": "Flat refusal to pay, no date or amount"},
@@ -201,7 +201,7 @@
     "source_ids": ["brief-a-manual"]
   },
   "fixed_sentences": {
-    "opening": "Hello, this is Freya Bank's digital assistant. This call is recorded.",
+    "opening": "Hello, this is Freya Bank's digital assistant. Please note that we are recording this call.",
     "identity_ask": "Am I speaking with {{title}} {{last_name}}?",
     "deceased": "I am sorry for your loss.",
     "sympathy": "I am sorry to hear that.",

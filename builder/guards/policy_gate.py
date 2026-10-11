@@ -188,13 +188,50 @@ try:
         config["body"] = body
         config["method"] = "POST"
         vars["last_promise_pid"] = body["product_id"]
+        _push_promise_pid(body["product_id"])
         vars["write_blocked"] = "no"
         vars["gate_ok"] = "no"
+    def _push_promise_pid(pid_push):
+        # FIFO + per-pid attempted markers (same race pattern as note writes).
+        # Parallel create_promise calls share a vars snapshot; last_promise_pid
+        # alone collapses to one product and check_remaining re-enters write_promises.
+        sp = str(pid_push or "")
+        if not sp:
+            return
+        stack = vars.get("promise_pid_stack") or "[]"
+        if isinstance(stack, str):
+            try:
+                stack = json.loads(stack)
+            except Exception:
+                stack = []
+        if not isinstance(stack, list):
+            stack = []
+        stack.append(sp)
+        try:
+            vars["promise_pid_stack"] = json.dumps(stack)
+        except Exception:
+            vars["promise_pid_stack"] = stack
+        safe = "".join(ch if (ch.isalnum() or ch == "_") else "_" for ch in sp)[:64]
+        if safe:
+            vars["promise_attempted_" + safe] = "yes"
+    def _promised_all():
+        out = [str(x) for x in _load_list("promised_products")]
+        for raw_pid in _load_list("allowed_product_ids"):
+            sp = str(raw_pid)
+            safe = "".join(ch if (ch.isalnum() or ch == "_") else "_" for ch in sp)[:64]
+            if safe and str(vars.get("promised_" + safe) or "") == "yes" and sp not in out:
+                out.append(sp)
+        return out
     if not isinstance(config, dict):
         vars["write_blocked"] = "yes"
     elif str(vars.get("gate_ok") or "") == "yes" or str(vars.get("floor_offered") or "") == "yes":
-        # Floor-offer path always writes the staged gate_* values.
-        _bake_gate()
+        # Floor-offer / deadline-offer path always writes the staged gate_* values.
+        if str(vars.get("gate_product_id") or "") in _promised_all():
+            vars["block_reason"] = "already_promised"
+            vars["last_promise_pid"] = str(vars.get("gate_product_id") or "")
+            _block()
+        else:
+            _bake_gate()
     else:
         body = config.get("body")
         if not isinstance(body, dict):
@@ -202,7 +239,7 @@ try:
         pid = str(body.get("product_id") or "")
         date = str(body.get("date") or "")
         allowed = _load_list("allowed_product_ids")
-        promised = _load_list("promised_products")
+        promised = _promised_all()
         deadlines = _load_map("deadlines_json")
         floors = _load_map("floors_json")
         dues = _load_map("past_dues_json")
@@ -238,20 +275,10 @@ try:
             blocked = True
             reason = "no_deadline"
         # Multi-product: prefer per-product fitted dates from fit_product_dates.
+        # Do NOT invent fitted dates for every product from proposed_date here —
+        # that left open products looking "already confirmed" and skipped persuasion
+        # (extra "pay today?" asks that burn attempt budget).
         fitted = _load_map("fitted_dates_json")
-        if not fitted:
-            # Build from proposed_date on the fly when fit node was skipped.
-            proposed = str(vars.get("proposed_date") or "")
-            if proposed and len(allowed) > 1:
-                fitted = {}
-                for ap in allowed:
-                    lim = str(deadlines.get(ap) or "")
-                    day = proposed
-                    if day and lim and day > lim:
-                        day = lim
-                    if day:
-                        fitted[str(ap)] = day
-                vars["fitted_dates_json"] = json.dumps(fitted)
         if isinstance(fitted, dict) and pid in fitted and str(fitted.get(pid) or ""):
             fitted_day = str(fitted.get(pid))
             # Prefer a valid body date over a stale past fitted extraction.
@@ -364,6 +391,16 @@ try:
         else:
             blocked = True
             reason = "no_date"
+        # Amounts staged by fit_dates / accept_persuasion (full past-due, floor, or an
+        # accepted in-range customer amount) override whatever the model typed.
+        fitted_amounts = _load_map("fitted_amounts_json")
+        if isinstance(fitted_amounts, dict) and pid in fitted_amounts:
+            try:
+                staged_amt = float(fitted_amounts.get(pid))
+                if staged_amt > 0:
+                    body["amount"] = staged_amt
+            except Exception:
+                pass
         try:
             amount = float(body.get("amount"))
         except Exception:
@@ -381,12 +418,15 @@ try:
                 reason = "above_full"
         if blocked:
             vars["block_reason"] = reason
+            if pid:
+                vars["last_promise_pid"] = pid
             _block()
         else:
             body["customer_id"] = str(vars.get("customer_id") or body.get("customer_id") or "")
             config["body"] = body
             config["method"] = "POST"
             vars["last_promise_pid"] = pid
+            _push_promise_pid(pid)
             vars["write_blocked"] = "no"
             vars["block_reason"] = ""
 except Exception:

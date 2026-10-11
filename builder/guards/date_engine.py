@@ -584,6 +584,12 @@ def apply_facts(vars):
         vars["account_summary"] = " ".join(summaries)
     else:
         vars["account_summary"] = "No late products were returned."
+    # Brief A 17/28, Brief B 2/4: state every product, then ONE first ask — spoken by TTS on
+    # collection entry so the dialogue model cannot ask for a payment before listing products.
+    intro = str(vars.get("collections_intro") or "I am calling from the collections team about a late payment.")
+    ask_one = str(vars.get("first_ask") or "Can you make this payment today?")
+    ask_all = str(vars.get("first_ask_all") or "Can you pay all of them today?")
+    vars["intro_tts"] = intro + " " + vars["account_summary"] + " " + (ask_all if len(ids) > 1 else ask_one)
     if not ids:
         vars["dates_ready"] = "no"
     else:

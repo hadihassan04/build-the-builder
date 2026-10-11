@@ -102,8 +102,71 @@ except Exception:
 
 
 def create_promise_post_hook():
+    # promise_pid_stack / promise_attempted_<pid> mirror note writes: parallel create_promise
+    # calls must not all attribute last_promise_pid (PUB-11/13 write_promises goodbye loop).
     text = """
 try:
+    import json as _json
+    def _pop_promise_pid():
+        raw = vars.get("promise_pid_stack") or "[]"
+        if isinstance(raw, str):
+            try:
+                stack = _json.loads(raw)
+            except Exception:
+                stack = []
+        elif isinstance(raw, list):
+            stack = raw
+        else:
+            stack = []
+        if not isinstance(stack, list):
+            stack = []
+        pid = ""
+        if stack:
+            pid = str(stack.pop(0) or "")
+        try:
+            vars["promise_pid_stack"] = _json.dumps(stack)
+        except Exception:
+            vars["promise_pid_stack"] = stack
+        if not pid:
+            pid = str(vars.get("last_promise_pid") or "")
+        if not pid:
+            pid = str(vars.get("create_promise_args.product_id") or "")
+        return pid
+    def _mark_promised(pid_mark):
+        promised_list = vars.get("promised_products")
+        if isinstance(promised_list, str):
+            try:
+                promised_list = _json.loads(promised_list)
+            except Exception:
+                promised_list = []
+        if not isinstance(promised_list, list):
+            promised_list = []
+        promised_list = [str(x) for x in promised_list]
+        if pid_mark and pid_mark not in promised_list:
+            promised_list.append(pid_mark)
+        try:
+            vars["promised_products"] = _json.dumps(promised_list)
+        except Exception:
+            vars["promised_products"] = promised_list
+        if pid_mark:
+            safe = "".join(ch if (ch.isalnum() or ch == "_") else "_" for ch in pid_mark)[:64]
+            if safe:
+                vars["promised_" + safe] = "yes"
+        return promised_list
+    def _open_after(promised_list):
+        left = []
+        try:
+            ids = vars.get("allowed_product_ids") or []
+            if isinstance(ids, str):
+                ids = _json.loads(ids)
+            for item in ids or []:
+                sp = str(item)
+                safe = "".join(ch if (ch.isalnum() or ch == "_") else "_" for ch in sp)[:64]
+                if sp not in promised_list and str(vars.get("promised_" + safe) or "") != "yes":
+                    left.append(sp)
+        except Exception:
+            left = []
+        return left
     if isinstance(result, dict):
         result.pop("header", None)
         data = result.get("data")
@@ -117,11 +180,10 @@ try:
             if reason == "after_deadline" and offer:
                 due = ""
                 try:
-                    import json as _json
                     dues = vars.get("past_dues_json") or {}
                     if isinstance(dues, str):
                         dues = _json.loads(dues)
-                    pid = str(vars.get("last_promise_pid") or "")
+                    pid = _pop_promise_pid()
                     if isinstance(dues, dict) and pid in dues:
                         due = str(dues.get(pid))
                 except Exception:
@@ -136,6 +198,18 @@ try:
                 data["what_to_do_next"] = (
                     "That amount is below the floor. Do not say it was recorded. "
                     "Offer the floor amount once."
+                )
+            elif reason == "already_promised":
+                pid = _pop_promise_pid()
+                promised = _mark_promised(pid)
+                vars["has_promise"] = "true"
+                # Exit write_promises / listen_confirm — not a failure.
+                vars["promise_just_ok"] = "yes"
+                left_now = _open_after(promised)
+                data["what_to_do_next"] = (
+                    "That product already has a recorded promise. Do NOT call create_promise for it again "
+                    "and do not treat this as a failure. "
+                    + ("Continue with remaining products: " + ",".join(left_now) + "." if left_now else "All products are settled; the workflow will close the call.")
                 )
             elif reason in ("not_business_day", "holiday"):
                 if offer:
@@ -155,7 +229,19 @@ try:
                 )
         else:
             ok = data.get("ok") is True or str(data.get("ok")).lower() == "true"
-            if ok:
+            err_text = str(data.get("error") or "").lower()
+            if (not ok) and ("already has a promise" in err_text):
+                # Bank truth: this product is already promised. Not a service failure.
+                pid = _pop_promise_pid()
+                promised = _mark_promised(pid)
+                vars["has_promise"] = "true"
+                vars["promise_just_ok"] = "yes"
+                left_now = _open_after(promised)
+                data["what_to_do_next"] = (
+                    "This product already has a promise from earlier in the call. Do NOT call create_promise for it again. "
+                    + ("Continue with remaining products: " + ",".join(left_now) + "." if left_now else "All products are settled; the workflow will close the call.")
+                )
+            elif ok:
                 vars["has_promise"] = "true"
                 vars["promise_recorded"] = "true"
                 # One-shot flag so collection does not re-enter promise_recorded on a stale ok.
@@ -163,30 +249,10 @@ try:
                 vars["create_promise_failures"] = 0
                 if str(vars.get("floor_offered") or "") == "yes":
                     vars["floor_offered"] = "done"
-                pid = str(vars.get("last_promise_pid") or "")
-                promised = vars.get("promised_products")
-                if not isinstance(promised, list):
-                    promised = []
-                if pid and pid not in promised:
-                    promised.append(pid)
-                # Persist as JSON string — Freya drops bare list mutations across turns.
-                try:
-                    import json as _json
-                    vars["promised_products"] = _json.dumps(promised)
-                except Exception:
-                    vars["promised_products"] = promised
+                pid = _pop_promise_pid()
+                promised = _mark_promised(pid)
                 # Do not speak "recorded" here — promise_recorded node TTS does that.
-                open_left = []
-                try:
-                    import json as _json
-                    ids = vars.get("allowed_product_ids") or []
-                    if isinstance(ids, str):
-                        ids = _json.loads(ids)
-                    for item in ids or []:
-                        if str(item) not in promised:
-                            open_left.append(str(item))
-                except Exception:
-                    open_left = []
+                open_left = _open_after(promised)
                 if open_left:
                     data["what_to_do_next"] = (
                         "Promise ok for " + pid + ". Do not say recorded yourself. "

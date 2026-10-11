@@ -169,6 +169,7 @@ def create_promise_tool(tools_ir: Dict[str, Any]) -> Dict[str, Any]:
         ["product_id", "amount", "date"],
         pre=create_promise_pre_process(),
         post=create_promise_post_hook(),
+        max_retries=1,
         max_per_n_turns=2,
         url=((tools_ir.get("by_name") or {}).get("create_promise") or {}).get("url"),
     )

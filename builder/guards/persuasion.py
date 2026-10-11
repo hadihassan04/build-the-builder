@@ -30,11 +30,22 @@ def _load_list(raw):
     return []
 
 
+def _promised_ids(vars):
+    """Promised pids: JSON list plus race-safe promised_<pid> markers."""
+    out = [str(x) for x in _load_list(vars.get("promised_products"))]
+    for pid in _load_list(vars.get("allowed_product_ids")):
+        sp = str(pid)
+        safe = "".join(ch if (ch.isalnum() or ch == "_") else "_" for ch in sp)[:64]
+        if safe and str(vars.get("promised_" + safe) or "") == "yes" and sp not in out:
+            out.append(sp)
+    return out
+
+
 def _open_product_ids(vars):
     """Open products in get_account order (not promised, not noted)."""
     ids = _load_list(vars.get("allowed_product_ids"))
-    promised = [str(x) for x in _load_list(vars.get("promised_products"))]
-    noted = []
+    promised = _promised_ids(vars)
+    noted = [str(x) for x in _load_list(vars.get("noted_products"))]
     for row in _load_list(vars.get("ledger_notes")):
         if isinstance(row, dict) and row.get("product_id"):
             noted.append(str(row.get("product_id")))
@@ -55,7 +66,12 @@ def advance_persuasion(vars):
     """
     vars["need_fit_dates"] = "no"
     vars["resume_collection"] = "no"
+    vars["persuasion_offer_date"] = ""
+    vars["persuasion_offer_amount"] = ""
     intent = str(vars.get("customer_intent") or "")
+    # Consume the intent: a stale 'refuses' must not re-route the next listen node
+    # when extraction fails (low confidence) on the customer's following turn.
+    vars["customer_intent"] = "other"
     proposed = str(vars.get("proposed_date") or "").strip()
     consumed = str(vars.get("proposed_date_consumed") or "") == "yes"
     # Same-turn named date with proposes_date / vague pay intent → fit first.
@@ -86,7 +102,7 @@ def advance_persuasion(vars):
     # fit_product_dates may stamp every product; if the customer is refusing some,
     # keep only the first unpromised fitted product (get_account order) for confirm.
     fitted = _load_map(vars.get("fitted_dates_json"))
-    promised_now = [str(x) for x in _load_list(vars.get("promised_products"))]
+    promised_now = _promised_ids(vars)
     id_order = [str(x) for x in _load_list(vars.get("allowed_product_ids"))]
     pending_pay = []
     for pid in id_order:
@@ -209,6 +225,8 @@ def advance_persuasion(vars):
         floor_s = str(floor or "")
 
     if next_n == 1:
+        vars["persuasion_offer_date"] = a1
+        vars["persuasion_offer_amount"] = floor_s if full_too_much else due_s
         if full_too_much:
             tts = (
                 "For your "
@@ -241,6 +259,8 @@ def advance_persuasion(vars):
             + "."
         )
     else:
+        vars["persuasion_offer_date"] = deadline
+        vars["persuasion_offer_amount"] = floor_s
         tts = (
             "For your "
             + label
@@ -301,10 +321,18 @@ def build_persuasion_code():
         "        if isinstance(parsed, list):\n"
         "            return parsed\n"
         "    return []\n",
+        "def _promised_ids(vars):\n"
+        "    out = [str(x) for x in _load_list(vars.get('promised_products'))]\n"
+        "    for pid in _load_list(vars.get('allowed_product_ids')):\n"
+        "        sp = str(pid)\n"
+        "        safe = ''.join(ch if (ch.isalnum() or ch == '_') else '_' for ch in sp)[:64]\n"
+        "        if safe and str(vars.get('promised_' + safe) or '') == 'yes' and sp not in out:\n"
+        "            out.append(sp)\n"
+        "    return out\n",
         "def _open_product_ids(vars):\n"
         "    ids = _load_list(vars.get('allowed_product_ids'))\n"
-        "    promised = [str(x) for x in _load_list(vars.get('promised_products'))]\n"
-        "    noted = []\n"
+        "    promised = _promised_ids(vars)\n"
+        "    noted = [str(x) for x in _load_list(vars.get('noted_products'))]\n"
         "    for row in _load_list(vars.get('ledger_notes')):\n"
         "        if isinstance(row, dict) and row.get('product_id'):\n"
         "            noted.append(str(row.get('product_id')))\n"

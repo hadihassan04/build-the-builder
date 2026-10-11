@@ -598,7 +598,7 @@ def test_deadline_refused_after_one_offer():
     assert v1["deadline_refused"] == "no"
     assert v1["gate_ok"] == "yes"
     assert v1["gate_date"] == "2026-10-23"
-    assert "2026-10-23" in v1["deadline_offer_tts"]
+    assert "23 October 2026" in v1["deadline_offer_tts"]
     assert json.loads(v1["fitted_dates_json"])["p1"] == "2026-10-23"
 
     v2 = dict(base)
@@ -608,6 +608,291 @@ def test_deadline_refused_after_one_offer():
     assert v2["deadline_refused"] == "yes"
     assert v2["customer_intent"] == "refuses"
     assert v2["fitted_dates_json"] == "{}"
+
+
+def _run_node_code(wf, node, vars):
+    code = wf["nodes"][node]["pre_actions"][0]["function"]["parameters"]["properties"]["code"]["default"]
+    exec(code, {"vars": vars, "json": json, "datetime": datetime})
+
+
+def test_readback_split_deadlines_pub13():
+    """Brief B.6: one date for both → card keeps 30 Oct, loan clamps to its own 23 Oct deadline."""
+    from builder.compile import compile_workflow
+
+    wf = compile_workflow(
+        json.loads((ROOT / "builder/policies/brief_a_b.policy.json").read_text()),
+        ROOT / "tools/openapi.json",
+    )
+    for name in ("speak_readback", "listen_confirm", "handle_vague", "speak_exact_day", "listen_exact_day", "accept_persuasion"):
+        assert name in wf["nodes"], name
+    v = {
+        "now": "2026-10-14T11:00",
+        "policy_holidays": HOLIDAYS,
+        "allowed_product_ids": ["p1", "p2"],
+        "deadlines_json": json.dumps({"p1": "2026-11-02", "p2": "2026-10-23"}),
+        "past_dues_json": json.dumps({"p1": 300, "p2": 900}),
+        "floors_json": json.dumps({"p1": 90, "p2": 300}),
+        "labels_json": json.dumps({"p1": "credit card ending 6604", "p2": "personal loan"}),
+        "fitted_dates_json": "{}",
+        "proposed_date": "2026-10-30",
+        "customer_intent": "proposes_date",
+        "pay_scope": "all",
+        "asked_if_ai": "yes",
+        "deadline_offered": "no",
+    }
+    _run_node_code(wf, "fit_product_dates", v)
+    assert v["need_readback"] == "yes"
+    assert v["need_deadline_offer"] == "no"
+    assert v["gate_ok"] == "no"
+    assert json.loads(v["fitted_dates_json"]) == {"p1": "2026-10-30", "p2": "2026-10-23"}
+    assert json.loads(v["fitted_amounts_json"])["p2"] == 900
+    tts = v["readback_tts"]
+    assert tts.startswith("I am Freya Bank's digital assistant. ")
+    assert "30 October 2026" in tts and "23 October 2026" in tts
+    assert "latest date I can record" in tts
+    assert tts.rstrip().endswith("Do you confirm?")
+    assert v["customer_intent"] == "other"
+    assert v["asked_if_ai"] == "no"
+    assert v["proposed_date_consumed"] == "yes"
+
+    # Pre-hook enforces the fitted date + staged amount even if the model typed 23 Oct / wrong amount.
+    from builder.guards.policy_gate import create_promise_pre_process
+
+    config = {"url": "https://bank/create_promise", "body": {"product_id": "p1", "amount": 250, "date": "2026-10-23"}}
+    v2 = dict(v)
+    v2["customer_id"] = "c1"
+    exec(create_promise_pre_process(), {"config": config, "vars": v2, "json": json})
+    assert v2["write_blocked"] == "no"
+    assert config["body"]["date"] == "2026-10-30"
+    assert config["body"]["amount"] == 300.0
+
+
+def test_readback_holiday_shift_and_vague_pub07():
+    from builder.compile import compile_workflow
+
+    wf = compile_workflow(
+        json.loads((ROOT / "builder/policies/brief_a_b.policy.json").read_text()),
+        ROOT / "tools/openapi.json",
+    )
+    base = {
+        "now": "2026-10-14T11:00",
+        "policy_holidays": HOLIDAYS,
+        "allowed_product_ids": ["p1"],
+        "deadlines_json": json.dumps({"p1": "2026-10-30"}),
+        "past_dues_json": json.dumps({"p1": 540}),
+        "floors_json": json.dumps({"p1": 180}),
+        "labels_json": json.dumps({"p1": "personal loan"}),
+        "fitted_dates_json": "{}",
+    }
+    # vague → ask exact day once
+    v = dict(base)
+    v["customer_intent"] = "vague_period"
+    v["proposed_date"] = "2026-10-26"
+    _run_node_code(wf, "handle_vague", v)
+    assert v["ask_exact_day"] == "yes" and v["exact_day_asked"] == "yes"
+    assert "exact day" in v["vague_tts"]
+    assert v["proposed_date_consumed"] == "yes"
+    # second vague → propose the deadline (single product)
+    v2 = dict(v)
+    v2["customer_intent"] = "vague_period"
+    _run_node_code(wf, "handle_vague", v2)
+    assert v2["ask_exact_day"] == "no"
+    assert v2["need_deadline_offer"] == "yes"
+    assert v2["gate_date"] == "2026-10-30"
+    # Monday 26 Oct holiday → Tuesday 27 Oct, said in the read-back
+    v3 = dict(base)
+    v3["customer_intent"] = "proposes_date"
+    v3["proposed_date"] = "2026-10-26"
+    _run_node_code(wf, "fit_product_dates", v3)
+    assert v3["need_readback"] == "yes"
+    assert json.loads(v3["fitted_dates_json"]) == {"p1": "2026-10-27"}
+    assert "26 October 2026 is a bank holiday" in v3["readback_tts"]
+    assert "27 October 2026" in v3["readback_tts"]
+    # pays today → today (ignore a past/wrong proposed_date from extraction)
+    v4 = dict(base)
+    v4["customer_intent"] = "pays_today"
+    v4["proposed_date"] = "2026-10-11"
+    _run_node_code(wf, "fit_product_dates", v4)
+    assert json.loads(v4["fitted_dates_json"]) == {"p1": "2026-10-14"}, v4.get("fitted_dates_json")
+    # vague invented date → ask exact day, do not fit
+    v5 = dict(base)
+    v5["customer_intent"] = "proposes_date"
+    v5["proposed_date"] = "2026-10-25"
+    v5["period_is_vague"] = "yes"
+    v5["exact_day_asked"] = "no"
+    _run_node_code(wf, "fit_product_dates", v5)
+    assert v5["ask_exact_day"] == "yes"
+    assert v5.get("need_readback") != "yes"
+
+
+def test_readback_three_products_pub11_and_accept_persuasion():
+    from builder.compile import compile_workflow
+
+    wf = compile_workflow(
+        json.loads((ROOT / "builder/policies/brief_a_b.policy.json").read_text()),
+        ROOT / "tools/openapi.json",
+    )
+    v = {
+        "now": "2026-10-14T11:00",
+        "policy_holidays": HOLIDAYS,
+        "allowed_product_ids": ["p1", "p2", "p3"],
+        "deadlines_json": json.dumps({"p1": "2026-10-23", "p2": "2026-10-23", "p3": "2026-11-02"}),
+        "past_dues_json": json.dumps({"p1": 220, "p2": 640, "p3": 75}),
+        "floors_json": json.dumps({"p1": 66, "p2": 213, "p3": 25}),
+        "labels_json": json.dumps({"p1": "credit card ending 2288", "p2": "personal loan", "p3": "car loan"}),
+        "fitted_dates_json": "{}",
+        "proposed_date": "2026-10-16",
+        "customer_intent": "proposes_date",
+    }
+    _run_node_code(wf, "fit_product_dates", v)
+    assert json.loads(v["fitted_dates_json"]) == {"p1": "2026-10-16", "p2": "2026-10-16", "p3": "2026-10-16"}
+    assert v["readback_tts"].count("16 October 2026") == 3
+    assert v["readback_tts"].count("?") == 1
+    # pay_scope some → no stamping, dialogue model reads back the payable subset
+    v2 = dict(v)
+    v2["pay_scope"] = "some"
+    v2["customer_intent"] = "proposes_date"
+    _run_node_code(wf, "fit_product_dates", v2)
+    assert v2["need_readback"] == "no"
+    assert v2["fitted_dates_json"] == "{}"
+    assert "SOME products" in v2["instruction"]
+    # accept persuasion offer → single-product read-back
+    v3 = dict(v)
+    v3.update({"persuasion_focus": "p2", "persuasion_offer_date": "2026-10-16", "persuasion_offer_amount": "640.00",
+               "fitted_dates_json": "{}", "fitted_amounts_json": "{}", "customer_intent": "confirm_yes"})
+    _run_node_code(wf, "accept_persuasion", v3)
+    assert v3["need_readback"] == "yes"
+    assert json.loads(v3["fitted_dates_json"]) == {"p2": "2026-10-16"}
+    assert "personal loan" in v3["readback_tts"] and "640.00" in v3["readback_tts"]
+
+
+def test_promised_markers_and_already_has_promise():
+    """promised_products is a JSON string across turns; parallel ok results must not drop pids."""
+    from builder.guards.post_hooks import create_promise_post_hook
+    from builder.guards.policy_gate import create_promise_pre_process
+
+    post = create_promise_post_hook()
+    vars = {"allowed_product_ids": ["p1", "p2", "p3"], "promised_products": "[]", "last_promise_pid": "p1"}
+    exec(post, {"result": {"status": "success", "data": {"ok": True}}, "vars": vars, "json": json})
+    assert json.loads(vars["promised_products"]) == ["p1"]
+    assert vars["promised_p1"] == "yes"
+    vars["last_promise_pid"] = "p2"
+    exec(post, {"result": {"status": "success", "data": {"ok": True}}, "vars": vars, "json": json})
+    assert json.loads(vars["promised_products"]) == ["p1", "p2"]
+    # Bank says already promised → ledger truth, not a service failure
+    vars["last_promise_pid"] = "p3"
+    vars["create_promise_failures"] = 0
+    r = {"status": "success", "data": {"ok": False, "error": "this product already has a promise"}}
+    exec(post, {"result": r, "vars": vars, "json": json})
+    assert vars["promised_p3"] == "yes"
+    assert vars["promise_just_ok"] == "yes"
+    assert int(vars.get("create_promise_failures") or 0) == 0
+    assert "forced_outcome" not in vars
+    assert "already has a promise" in r["data"]["what_to_do_next"]
+    # Pre-hook blocks a duplicate via the marker alone (list dropped by a var merge)
+    config = {"url": "https://bank/create_promise", "body": {"product_id": "p2", "amount": 640, "date": "2026-10-16"}}
+    v2 = {
+        "allowed_product_ids": ["p1", "p2"],
+        "promised_products": "[]",
+        "promised_p2": "yes",
+        "deadlines_json": json.dumps({"p1": "2026-10-23", "p2": "2026-10-23"}),
+        "past_dues_json": json.dumps({"p1": 220, "p2": 640}),
+        "floors_json": json.dumps({"p1": 66, "p2": 213}),
+        "policy_holidays": HOLIDAYS,
+        "now": "2026-10-14T11:00",
+        "customer_id": "c1",
+    }
+    exec(create_promise_pre_process(), {"config": config, "vars": v2, "json": json})
+    assert v2["write_blocked"] == "yes" and v2["block_reason"] == "already_promised"
+
+
+def test_parallel_promise_race_reconciles():
+    """True-parallel create_promise: last_promise_pid collapses; check_remaining must credit attempts."""
+    from builder.guards.policy_gate import create_promise_pre_process
+    from builder.guards.post_hooks import create_promise_post_hook
+    from builder.compile import compile_workflow
+
+    pre = create_promise_pre_process()
+    post = create_promise_post_hook()
+    base = {
+        "allowed_product_ids": ["p1", "p2", "p3"],
+        "promised_products": "[]",
+        "deadlines_json": json.dumps({"p1": "2026-10-23", "p2": "2026-10-23", "p3": "2026-10-23"}),
+        "past_dues_json": json.dumps({"p1": 220, "p2": 640, "p3": 75}),
+        "floors_json": json.dumps({"p1": 66, "p2": 213, "p3": 25}),
+        "fitted_dates_json": json.dumps({"p1": "2026-10-16", "p2": "2026-10-16", "p3": "2026-10-16"}),
+        "fitted_amounts_json": json.dumps({"p1": 220, "p2": 640, "p3": 75}),
+        "policy_holidays": HOLIDAYS,
+        "now": "2026-10-14T11:00",
+        "customer_id": "c1",
+        "create_promise_failures": 0,
+    }
+    # Three parallel pre-hooks (separate snapshots) — per-pid attempted markers survive merge.
+    snaps = []
+    for pid, amt in (("p1", 220), ("p2", 640), ("p3", 75)):
+        v = dict(base)
+        c = {"url": "https://bank/create_promise", "body": {"product_id": pid, "amount": amt, "date": "2026-10-16"}}
+        exec(pre, {"config": c, "vars": v, "json": json})
+        assert v["write_blocked"] == "no"
+        snaps.append(v)
+    live = dict(base)
+    for v in snaps:
+        for k, val in v.items():
+            if k.startswith("promise_attempted_") or k in ("last_promise_pid", "promise_pid_stack"):
+                live[k] = val
+    # Platform merge last-write-wins on last_promise_pid / stack — only one pid kept.
+    assert live.get("last_promise_pid") in ("p1", "p2", "p3")
+    assert live["promise_attempted_p1"] == "yes"
+    assert live["promise_attempted_p2"] == "yes"
+    assert live["promise_attempted_p3"] == "yes"
+    # Three ok posts all see the raced last_promise_pid → under-count without reconcile.
+    for _ in range(3):
+        r = {"status": "success", "data": {"ok": True}}
+        exec(post, {"result": r, "vars": live, "json": json})
+    # Stack may have credited only one; markers from race are incomplete.
+    # check_remaining must promote all attempted when failures==0.
+    policy = json.loads(open("builder/policies/brief_a_b.policy.json").read())
+    wf = compile_workflow(policy, "tools/openapi.json")
+    code = wf["nodes"]["check_remaining"]["pre_actions"][0]["function"]["parameters"]["properties"]["code"]["default"]
+    live["has_promise"] = "true"
+    live["noted_products"] = "[]"
+    live["ledger_notes"] = "[]"
+    exec(code, {"vars": live, "json": json})
+    promised = set(json.loads(live["promised_products"]))
+    assert promised == {"p1", "p2", "p3"}, promised
+    assert live.get("need_write_promises") == "no"
+    assert live.get("continue_collection") == "no"
+
+
+def test_intro_tts_states_every_product_before_ask():
+    from builder.guards.date_engine import DATE_ENGINE_CODE
+
+    g = {
+        "vars": {
+            "now": "2026-10-14T11:00",
+            "policy_holidays": HOLIDAYS,
+            "policy_bands": [
+                {"name": "early", "days_late_min": 1, "days_late_max": 7, "deadline_business_days": 12, "persuasion_attempts": 1},
+                {"name": "late", "days_late_min": 8, "days_late_max": 45, "deadline_business_days": 7, "persuasion_attempts": 2},
+            ],
+            "floor_fields_json": json.dumps({"credit_card": "minimum_payment", "personal_loan": "instalment_amount", "car_loan": "instalment_amount"}),
+            "collections_intro": "I am calling from the collections team about a late payment.",
+            "first_ask": "Can you make this payment today?",
+            "first_ask_all": "Can you pay all of them today?",
+            "account_products_json": json.dumps([
+                {"product_id": "p1", "type": "credit_card", "card_last4": "2288", "past_due": 220, "days_late": 9, "minimum_payment": 66},
+                {"product_id": "p2", "type": "personal_loan", "past_due": 640, "days_late": 9, "instalment_amount": 213},
+                {"product_id": "p3", "type": "car_loan", "past_due": 75, "days_late": 3, "instalment_amount": 25},
+            ]),
+        }
+    }
+    exec(DATE_ENGINE_CODE, g)
+    tts = g["vars"]["intro_tts"]
+    assert tts.startswith("I am calling from the collections team")
+    for piece in ("credit card ending 2288", "personal loan", "car loan", "220.00", "640.00", "75.00"):
+        assert piece in tts, piece
+    assert tts.endswith("Can you pay all of them today?")
+    assert tts.index("car loan") < tts.index("Can you pay all")
 
 
 def test_add_note_blocks_before_persuasion_exhausted():
@@ -656,6 +941,12 @@ def main():
         test_floor_offered_bakes_gate,
         test_persuasion_pub12_counters,
         test_deadline_refused_after_one_offer,
+        test_readback_split_deadlines_pub13,
+        test_readback_holiday_shift_and_vague_pub07,
+        test_readback_three_products_pub11_and_accept_persuasion,
+        test_promised_markers_and_already_has_promise,
+        test_parallel_promise_race_reconciles,
+        test_intro_tts_states_every_product_before_ask,
         test_add_note_blocks_before_persuasion_exhausted,
         test_note_just_ok_and_parallel_pid_stack,
         test_parallel_note_race_reconciles,
@@ -667,8 +958,10 @@ def main():
             t()
             print("PASS", t.__name__)
         except Exception as e:
+            import traceback
             failed += 1
-            print("FAIL", t.__name__, e)
+            print("FAIL", t.__name__, repr(e))
+            traceback.print_exc()
     print(f"{len(tests) - failed}/{len(tests)} passed")
     return 0 if failed == 0 else 1
 

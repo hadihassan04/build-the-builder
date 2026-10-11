@@ -19,13 +19,17 @@ Fill `submission.json` and send it before **20:00 UTC**:
 }
 ```
 
-## During the final window
+## During the final window (what the builder does in one command)
 
-1. Download the zip → read `BRIEF.md`.
-2. Deploy `mock/` from their service contract (`cd mock && npx wrangler deploy`). Keep it up.
-3. Run **your** builder on the case folder (whatever command you already use). Point tool URLs at your mock.
-4. Export: `python3 -c "import freya; freya.export_workflow('<workflow_id>', 'submission/final.workflow.json')"`
-5. Save that run’s stdout as `traces/final.log` (strip API keys).
-6. Commit those two files, put the SHA + mock URL in `submission.json`, email it.
+```bash
+cd mock && npx wrangler login && cd ..        # once
+python3 builder/build.py "<case folder>" https://freya-final-mock.freya-bank-mock.workers.dev --live-test
+```
+
+One run: ingests the folder → parses the service contract → generates + tests + deploys the Cloudflare mock from
+`test-customers.json` → extracts the case policy with one logged model call → compiles, lints and offline-tests the
+workflow → saves it to the Freya slot `final` → exports `submission/final.workflow.json` → writes
+`traces/<timestamp>-builder.jsonl` and copies it to `traces/final.log` → (with `--live-test`) runs simulated calls.
+Then commit, put the SHA in `submission.json`, e-mail it. See `builder/case/README.md`.
 
 Do **not** hand-edit the exported workflow. Do **not** bake final-case rules into the builder.

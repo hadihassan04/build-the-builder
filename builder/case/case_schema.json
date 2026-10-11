@@ -1,0 +1,51 @@
+{
+  "$comment": "Case policy IR for a service-driven account/statement read-out phone flow. All business values come from the case pack via extraction; nothing here is a default for a specific bank.",
+  "required_top": ["schema_version", "language", "assistant_role", "service_roles", "request_fields", "response_fields", "currencies", "phrases", "limits", "handling", "readout"],
+  "service_roles": ["list_accounts", "balance", "cycle_get", "cycle_preview", "cycle_change", "contact_get", "document_send"],
+  "response_fields_required": {
+    "list_accounts": ["items_path", "item_number", "item_last4", "item_name"],
+    "balance": ["statement_date", "due_date", "next_statement_date", "next_due_date", "statement_debt", "min_payment", "remaining_debt", "remaining_min_payment", "total_debt", "status_field", "status_no_debt", "auto_payment_flag", "auto_payment_flag_yes", "auto_payment_amount"],
+    "cycle_get": ["week", "day", "next_statement_date", "next_due_date", "relation_type", "relation_main_value", "relation_linked_value", "related_name"],
+    "cycle_preview": ["statement_date", "due_date"],
+    "cycle_change": ["success_field", "success_value"],
+    "contact_get": ["email"],
+    "document_send": ["success_field", "success_value"]
+  },
+  "phrases_required": [
+    "no_eligible_card", "ask_which_card", "ask_last4", "ask_last6", "ask_full_number", "card_not_found", "another_card",
+    "debt_intro", "debt_intro_no_name", "tl_unpaid", "tl_min_paid", "tl_partial", "fx_debt", "no_debt_currencies",
+    "due_date", "due_today", "no_statement_debt",
+    "offer_both", "offer_change_only", "offer_email_only", "email_confirm", "email_sent", "no_email",
+    "cycle_current", "cycle_options", "cycle_shared_impact", "cycle_confirm", "cycle_done", "cycle_fail_transfer",
+    "service_error_transfer", "payment_transfer", "dispute_transfer", "agent_transfer", "to_menu",
+    "failed_attempts_exit", "silence_exit", "other_language_exit", "out_of_scope_ask", "checking"
+  ],
+  "phrases_optional": ["ask_which_card_short", "auto_payment", "no_statement_yet", "document_unavailable", "cycle_already_used", "third_party_exit", "ask_clear_yes", "cycle_current_shared", "cycle_no_change_needed", "cycle_option_invalid", "email_other_address", "only_last_statement", "ask_week_short", "calm_reply_hint"],
+  "placeholders": {
+    "ask_which_card": ["example1", "example2"],
+    "ask_last4": ["card_name"],
+    "ask_last6": ["last4"],
+    "card_not_found": ["card_list"],
+    "debt_intro": ["last4_spoken", "card_name", "statement_date"],
+    "debt_intro_no_name": ["last4_spoken", "statement_date"],
+    "tl_unpaid": ["currency", "statement_debt", "min_payment"],
+    "tl_min_paid": ["currency", "statement_debt", "remaining_debt"],
+    "tl_partial": ["currency", "statement_debt", "min_payment", "remaining_debt", "remaining_min"],
+    "fx_debt": ["currency", "statement_debt", "remaining_debt", "min_payment"],
+    "no_debt_currencies": ["currency_list"],
+    "auto_payment": ["amount"],
+    "due_date": ["due_date"],
+    "no_statement_debt": ["last4_spoken", "card_name", "statement_date", "total_debt", "due_date"],
+    "no_statement_yet": ["last4_spoken", "card_name", "total_debt"],
+    "email_confirm": ["email"],
+    "cycle_current": ["card_name", "week_ordinal", "next_statement_date", "next_due_date"],
+    "cycle_current_shared": ["card_name", "related_card_name", "week_ordinal", "next_statement_date", "next_due_date"],
+    "cycle_options": ["options"],
+    "cycle_shared_impact": ["related_card_name"],
+    "cycle_confirm": ["week_ordinal", "new_statement_date", "new_due_date"],
+    "cycle_done": ["last4_spoken", "card_name", "week_ordinal", "new_statement_date", "new_due_date"]
+  },
+  "limits_required": ["attempts_per_question", "silence_repeats_before_end", "complaint_replies_before_transfer", "document_resends_max"],
+  "handling_required": ["payment", "dispute", "agent_request", "service_error", "unsupported_language", "silence", "complaint", "out_of_scope", "third_party", "no_account"],
+  "handling_values": ["transfer", "menu", "end_call", "ask_menu", "calm_then_transfer"]
+}

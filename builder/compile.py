@@ -9,6 +9,12 @@ from typing import Any, Dict, List, Optional
 from builder.guards.date_engine import DATE_ENGINE_CODE
 from builder.guards.outcome_resolver import OUTCOME_RESOLVER_CODE
 from builder.guards.persuasion import PERSUASION_CODE
+from builder.guards.readback import (
+    ACCEPT_PERSUASION_CODE,
+    ACK_PROMISE_CODE,
+    FIT_DATES_CODE,
+    HANDLE_VAGUE_CODE,
+)
 from builder.templates.tools import (
     add_note_tool,
     close_call_lifecycle,
@@ -52,13 +58,39 @@ def _intent_schema(policy: Dict[str, Any], extra: Optional[List[str]] = None) ->
             "type": "string",
             "enum_values": ids,
             "description": "Primary customer intent this turn. Prefer the highest-priority match from the policy.",
-            "min_confidence": 0.6,
+            "min_confidence": 0.5,
         },
         {
             "name": "proposed_date",
             "type": "date",
             "description": "Payment or callback date if the customer named one. Empty if none.",
             "min_confidence": 0.55,
+        },
+        {
+            "name": "asked_if_ai",
+            "type": "string",
+            "enum_values": ["yes", "no"],
+            "description": "yes if in THIS turn the customer asked whether they are talking to a robot, an AI, a machine or a real person. Otherwise no.",
+            "min_confidence": 0.5,
+        },
+        {
+            "name": "pay_scope",
+            "type": "string",
+            "enum_values": ["all", "some"],
+            "description": "When the customer names a payment date or amount: all if it applies to every product (or only one product exists); some if they limited it to certain products or refused others in the same turn.",
+            "min_confidence": 0.5,
+        },
+        {
+            "name": "period_is_vague",
+            "type": "string",
+            "enum_values": ["yes", "no"],
+            "description": (
+                "yes if the customer named a vague period without a specific calendar day — "
+                "phrases like week after next, end of the month, when my salary, next week, "
+                "sometime next month. Set yes even if a date was also guessed. "
+                "no if they named a concrete day (the 26th, Monday the 26th, this Friday, 30 October)."
+            ),
+            "min_confidence": 0.5,
         },
         {
             "name": "proposed_amount",
@@ -195,6 +227,11 @@ def _seed_policy_vars_code(policy: Dict[str, Any]) -> str:
     )
     note_reasons = json.dumps(policy.get("notes", {}).get("reasons") or [])
     floor_fields = json.dumps((policy.get("amounts") or {}).get("floors_by_product_type") or {})
+    fixed = policy.get("fixed_sentences") or {}
+    intro = fixed.get("collections_intro", "I am calling from the collections team about a late payment.")
+    first_ask = (policy.get("negotiation") or {}).get("first_ask") or "Can you make this payment today?"
+    first_ask_all = (policy.get("multi_product") or {}).get("first_ask_all") or "Can you pay all of them today?"
+    ai_line = fixed.get("ai_ack") or (policy.get("opening") or {}).get("ai_disclosure") or "I am Freya Bank's digital assistant."
     # Avoid }} in generated code — use json.dumps already safe; no {{ }}
     return (
         "import json\n"
@@ -208,6 +245,25 @@ def _seed_policy_vars_code(policy: Dict[str, Any]) -> str:
         f"    vars['note_reasons'] = json.loads({note_reasons!r})\n"
         f"    vars['floor_fields_json'] = {floor_fields!r}\n"
         f"    vars['floor_fields'] = json.loads({floor_fields!r})\n"
+        f"    vars['collections_intro'] = {intro!r}\n"
+        f"    vars['first_ask'] = {first_ask!r}\n"
+        f"    vars['first_ask_all'] = {first_ask_all!r}\n"
+        f"    vars['ai_disclosure'] = {ai_line!r}\n"
+        f"    vars['intro_tts'] = {intro!r}\n"
+        "    vars['ai_prefix'] = ''\n"
+        "    vars['asked_if_ai'] = 'no'\n"
+        "    vars['pay_scope'] = 'all'\n"
+        "    vars['exact_day_asked'] = 'no'\n"
+        "    vars['ask_exact_day'] = 'no'\n"
+        "    vars['period_is_vague'] = 'no'\n"
+        "    vars['need_readback'] = 'no'\n"
+        "    vars['readback_tts'] = ''\n"
+        "    vars['vague_tts'] = ''\n"
+        "    vars['date_readback'] = ''\n"
+        "    vars['instruction'] = ''\n"
+        "    vars['fitted_amounts_json'] = '{}'\n"
+        "    vars['persuasion_offer_date'] = ''\n"
+        "    vars['persuasion_offer_amount'] = ''\n"
         "    vars['identity_ask_count'] = 0\n"
         "    vars['wrong_answer_total'] = 0\n"
         "    vars['no_talk_count'] = 0\n"
@@ -359,7 +415,7 @@ def compile_workflow(policy: Dict[str, Any], openapi_path: str | Path) -> Dict[s
         ),
         on_enter={
             "type": "tts",
-            "text": fixed.get("opening", "Hello, this is Freya Bank's digital assistant. This call is recorded.")
+            "text": fixed.get("opening", "Hello, this is Freya Bank's digital assistant. Please note that we are recording this call.")
             + " "
             + fixed.get("identity_ask", "Am I speaking with {{title}} {{last_name}}?"),
         },
@@ -400,29 +456,28 @@ def compile_workflow(policy: Dict[str, Any], openapi_path: str | Path) -> Dict[s
     third = _conv(
         "third_party",
         (
-            "A third party answered. Do not say why you are calling. Do not verify identity. Do not discuss the account.\n"
-            "Ask when the customer can be reached.\n"
-            "Allowed callback dates (YYYY-MM-DD) are ONLY: {{callback_allowed_dates}}. "
-            "If they say tomorrow, use {{callback_tomorrow}}. Default time if they say morning/eleven: {{callback_default_time}}.\n"
-            "Time must be 10:00-19:00 inclusive and later than now when the date is today.\n"
-            "If they offer a date outside that list (or a blocked tool result), ask once for today or tomorrow in the window. "
-            "If still outside, do not schedule; goodbye as no_callback.\n"
-            "When you have a valid date and time from the allowed list, CALL schedule_callback, then thank them and say goodbye ending with Have a good day.\n"
-            "Obey what_to_do_next on tool results."
+            "A third party answered. You may NOT say why you are calling, in any words. Do not verify identity. Do not discuss the account.\n"
+            "Forbidden words with this person: payment, payments, pay, bill, debt, owe, balance, account, collections, loan, card, overdue, late. "
+            "Never say what you cannot take or discuss (that reveals the purpose).\n"
+            "If they ask what the call is about, or offer to pay or help themselves: say only "
+            "'I can only discuss this with {{title}} {{last_name}} directly.' and ask again when they can be reached.\n"
+            "Ask when the customer can be reached. Do not claim a time is unavailable — the next node books it.\n"
+            "Do not CALL schedule_callback yourself; when they offer a time the workflow books it."
         ),
         on_enter={"type": "tts", "text": fixed.get("third_party_redirect", "I need to speak with the account holder. When would be a good time to reach them?")},
-        tools=[schedule_callback_tool(tools_ir), end_call_tool()],
+        tools=[end_call_tool()],
         extraction=_intent_schema(policy),
         transitions=[
             {
-                "target_node": "resolve_and_goodbye",
-                "description": "callback booked",
+                "target_node": "stage_callback",
+                "description": "third party offered a callback time",
                 "condition": {
                     "logic": "or",
                     "conditions": [
-                        {"variable": "schedule_callback_response.data.ok", "operator": "equals", "operand": "true"},
-                        {"variable": "schedule_callback_response.data.ok", "operator": "equals", "operand": "True"},
-                        {"variable": "has_callback", "operator": "equals", "operand": "true"},
+                        {"variable": "customer_intent", "operator": "equals", "operand": "callback_offer"},
+                        {"variable": "customer_intent", "operator": "equals", "operand": "proposes_date"},
+                        {"variable": "proposed_date", "operator": "is_set"},
+                        {"variable": "proposed_time", "operator": "is_set"},
                     ],
                 },
             },
@@ -437,7 +492,71 @@ def compile_workflow(policy: Dict[str, Any], openapi_path: str | Path) -> Dict[s
                 "condition": _or_eq("customer_intent", "wrong_number"),
             },
         ],
-        max_turns=10,
+        max_turns=8,
+        max_turn_to="close_no_callback",
+    )
+
+    stage_callback_code = (
+        "try:\n"
+        "    allowed = str(vars.get('callback_allowed_dates') or '')\n"
+        "    tomorrow = str(vars.get('callback_tomorrow') or '')\n"
+        "    default_t = str(vars.get('callback_default_time') or '11:00')\n"
+        "    day = str(vars.get('proposed_date') or '')\n"
+        "    clock = str(vars.get('proposed_time') or '')\n"
+        "    # Accept only today/next BD; otherwise snap to tomorrow (typical 'tomorrow morning').\n"
+        "    if day and day in allowed.split(','):\n"
+        "        pass\n"
+        "    else:\n"
+        "        day = tomorrow\n"
+        "    if len(clock) >= 5 and clock[2] == ':':\n"
+        "        hh = int(clock[0:2]); mm = int(clock[3:5])\n"
+        "        mins = hh * 60 + mm\n"
+        "        if mins < 600 or mins > 1140:\n"
+        "            clock = default_t\n"
+        "    else:\n"
+        "        clock = default_t\n"
+        "    if not day:\n"
+        "        day = tomorrow\n"
+        "    vars['gate_date'] = day\n"
+        "    vars['gate_time'] = clock\n"
+        "    vars['gate_ok'] = 'yes'\n"
+        "    vars['need_book_callback'] = 'yes'\n"
+        "    vars['callback_tts'] = (\n"
+        "        'I will call back on ' + day + ' at ' + clock + '.'\n"
+        "    )\n"
+        "except Exception:\n"
+        "    vars['gate_date'] = str(vars.get('callback_tomorrow') or '')\n"
+        "    vars['gate_time'] = '11:00'\n"
+        "    vars['gate_ok'] = 'yes'\n"
+        "    vars['need_book_callback'] = 'yes'\n"
+        "    vars['callback_tts'] = 'I will arrange a callback.'\n"
+    )
+    stage_callback = _code_node("stage_callback", stage_callback_code, "book_callback")
+    book_callback = _conv(
+        "book_callback",
+        (
+            "A callback was just announced. CALL schedule_callback now with date {{gate_date}} and time {{gate_time}}.\n"
+            "Do not discuss the account, payments, or debt. After ok true, thank them and say goodbye ending with Have a good day.\n"
+            "Obey what_to_do_next."
+        ),
+        on_enter={"type": "tts", "text": "{{callback_tts}}"},
+        tools=[schedule_callback_tool(tools_ir), end_call_tool()],
+        extraction=[],
+        transitions=[
+            {
+                "target_node": "resolve_and_goodbye",
+                "description": "callback booked",
+                "condition": {
+                    "logic": "or",
+                    "conditions": [
+                        {"variable": "schedule_callback_response.data.ok", "operator": "equals", "operand": "true"},
+                        {"variable": "schedule_callback_response.data.ok", "operator": "equals", "operand": "True"},
+                        {"variable": "has_callback", "operator": "equals", "operand": "true"},
+                    ],
+                },
+            },
+        ],
+        max_turns=4,
         max_turn_to="close_no_callback",
     )
 
@@ -547,10 +666,11 @@ def compile_workflow(policy: Dict[str, Any], openapi_path: str | Path) -> Dict[s
         (
             "You are on a collections call. The customer is verified.\n"
             "Facts: {{account_summary}}\nDate facts: {{date_facts}}\nNow: {{now}}.\n"
+            "Workflow instruction (obey when set): {{instruction}}\n"
             "If they ask whether you are a robot or AI at any time: say exactly that you are Freya Bank's digital assistant, then continue.\n"
-            "First: say you are calling from the collections team about a late payment. State every late product in one sentence each "
-            "(name product in words: credit card ending #### / personal loan / car loan; past-due amount; days late).\n"
-            "Then ask whether they can pay ALL of them today (or the one product if only one). Do not ask 'how much can you pay?'. You propose amounts.\n"
+            "The opening of this node already stated every late product and asked whether they can pay today — do not repeat it.\n"
+            "Do not ask 'how much can you pay?'. You propose amounts.\n"
+            "Never use the word recorded; a later node confirms recorded promises.\n"
             "Per product: band/deadline/attempts from date_facts. Promise date must be today+, business day, not after that product's deadline. "
             "Weekend/holiday before deadline → offer next business day with the same amount. "
             "If they name a date AFTER the deadline: that is NOT yet a refusal. Never CALL add_note reason refused for that first ask. "
@@ -598,7 +718,8 @@ def compile_workflow(policy: Dict[str, Any], openapi_path: str | Path) -> Dict[s
         ),
         on_enter={
             "type": "tts",
-            "text": fixed.get("collections_intro", "I am calling from the collections team about a late payment."),
+            # Built by compute_dates: intro + every product sentence + the single first ask.
+            "text": "{{intro_tts}}",
         },
         tools=collection_tools,
         extraction=_intent_schema(policy),
@@ -607,6 +728,40 @@ def compile_workflow(policy: Dict[str, Any], openapi_path: str | Path) -> Dict[s
                 "target_node": "ack_promise",
                 "description": "promise just succeeded",
                 "condition": _or_eq("promise_just_ok", "yes"),
+            },
+            {
+                "target_node": "handle_vague",
+                "description": "vague period — ask the exact day once (Brief A.21)",
+                "condition": {
+                    "logic": "and",
+                    "conditions": [
+                        {
+                            "logic": "or",
+                            "conditions": [
+                                {"variable": "customer_intent", "operator": "equals", "operand": "vague_period"},
+                                {"variable": "period_is_vague", "operator": "equals", "operand": "yes"},
+                            ],
+                        },
+                        {"variable": "exact_day_asked", "operator": "not_equals", "operand": "yes"},
+                    ],
+                },
+            },
+            {
+                "target_node": "still_vague",
+                "description": "still vague after one exact-day ask — propose deadline",
+                "condition": {
+                    "logic": "and",
+                    "conditions": [
+                        {
+                            "logic": "or",
+                            "conditions": [
+                                {"variable": "customer_intent", "operator": "equals", "operand": "vague_period"},
+                                {"variable": "period_is_vague", "operator": "equals", "operand": "yes"},
+                            ],
+                        },
+                        {"variable": "exact_day_asked", "operator": "equals", "operand": "yes"},
+                    ],
+                },
             },
             {
                 "target_node": "resolve_and_goodbye",
@@ -637,8 +792,8 @@ def compile_workflow(policy: Dict[str, Any], openapi_path: str | Path) -> Dict[s
             },
             {
                 "target_node": "fit_product_dates",
-                "description": "named a payment date",
-                "condition": _or_eq("customer_intent", "proposes_date"),
+                "description": "named a payment date (or pays today)",
+                "condition": _or_eq("customer_intent", "proposes_date", "pays_today"),
             },
             {
                 "target_node": "stage_floor",
@@ -741,171 +896,47 @@ def compile_workflow(policy: Dict[str, Any], openapi_path: str | Path) -> Dict[s
                 "condition": _or_eq("customer_intent", "refuses", "confirm_no", "no_talk"),
             },
             {
+                "target_node": "accept_persuasion",
+                "description": "accepted the scripted offer → read-back",
+                "condition": _or_eq("customer_intent", "confirm_yes"),
+            },
+            {
+                "target_node": "fit_product_dates",
+                "description": "named a date instead → fit per product",
+                "condition": _or_eq("customer_intent", "proposes_date", "pays_today"),
+            },
+            {
+                "target_node": "handle_vague",
+                "description": "vague period → ask exact day",
+                "condition": {
+                    "logic": "or",
+                    "conditions": [
+                        {"variable": "customer_intent", "operator": "equals", "operand": "vague_period"},
+                        {"variable": "period_is_vague", "operator": "equals", "operand": "yes"},
+                    ],
+                },
+            },
+            {
+                "target_node": "hardship",
+                "description": "hardship",
+                "condition": _or_eq("customer_intent", "hardship"),
+            },
+            {
+                "target_node": "stage_floor",
+                "description": "full amount too much",
+                "condition": _or_eq("customer_intent", "full_too_much"),
+            },
+            {
                 "target_node": "collection",
-                "description": "accepted or named terms",
-                "condition": _or_eq(
-                    "customer_intent",
-                    "confirm_yes",
-                    "proposes_date",
-                    "proposes_amount",
-                    "pays_today",
-                ),
+                "description": "named an amount / other terms",
+                "condition": _or_eq("customer_intent", "proposes_amount", "restructure", "already_paid", "dispute"),
             },
         ],
-        max_turns=2,
+        max_turns=3,
         max_turn_to="track_persuasion",
     )
 
-    fit_dates_code = (
-        "import json\n"
-        "import datetime\n"
-        "try:\n"
-        "    proposed = str(vars.get('proposed_date') or '')\n"
-        "    ids = vars.get('allowed_product_ids') or []\n"
-        "    if isinstance(ids, str):\n"
-        "        ids = json.loads(ids)\n"
-        "    if not isinstance(ids, list):\n"
-        "        ids = []\n"
-        "    deadlines = vars.get('deadlines_json') or {}\n"
-        "    if isinstance(deadlines, str):\n"
-        "        deadlines = json.loads(deadlines)\n"
-        "    if not isinstance(deadlines, dict):\n"
-        "        deadlines = {}\n"
-        "    dues = vars.get('past_dues_json') or {}\n"
-        "    if isinstance(dues, str):\n"
-        "        dues = json.loads(dues)\n"
-        "    if not isinstance(dues, dict):\n"
-        "        dues = {}\n"
-        "    holidays = vars.get('policy_holidays') or []\n"
-        "    if isinstance(holidays, str):\n"
-        "        holidays = json.loads(holidays)\n"
-        "    fitted = vars.get('fitted_dates_json') or {}\n"
-        "    if isinstance(fitted, str):\n"
-        "        try:\n"
-        "            fitted = json.loads(fitted)\n"
-        "        except Exception:\n"
-        "            fitted = {}\n"
-        "    if not isinstance(fitted, dict):\n"
-        "        fitted = {}\n"
-        "    now_raw = str(vars.get('now') or '')\n"
-        "    today = datetime.date(2026, 1, 1)\n"
-        "    if len(now_raw) >= 10:\n"
-        "        try:\n"
-        "            today = datetime.date(int(now_raw[0:4]), int(now_raw[5:7]), int(now_raw[8:10]))\n"
-        "        except Exception:\n"
-        "            today = datetime.date(2026, 1, 1)\n"
-        "    def _is_bd(check):\n"
-        "        if check is None or check.weekday() >= 5:\n"
-        "            return False\n"
-        "        iso = check.isoformat()\n"
-        "        for h in holidays or []:\n"
-        "            if str(h) == iso:\n"
-        "                return False\n"
-        "        return True\n"
-        "    def _next_bd(start):\n"
-        "        nxt = start + datetime.timedelta(days=1)\n"
-        "        guard = 0\n"
-        "        while not _is_bd(nxt) and guard < 14:\n"
-        "            nxt = nxt + datetime.timedelta(days=1)\n"
-        "            guard = guard + 1\n"
-        "        return nxt\n"
-        "    def _parse(iso):\n"
-        "        if not iso or len(str(iso)) < 10:\n"
-        "            return None\n"
-        "        raw = str(iso)\n"
-        "        try:\n"
-        "            return datetime.date(int(raw[0:4]), int(raw[5:7]), int(raw[8:10]))\n"
-        "        except Exception:\n"
-        "            return None\n"
-        "    prop_day = _parse(proposed)\n"
-        "    if prop_day is not None and prop_day < today:\n"
-        "        # Mis-parsed 'tomorrow' → next business day after today (not today).\n"
-        "        prop_day = _next_bd(today)\n"
-        "        proposed = prop_day.isoformat()\n"
-        "        vars['proposed_date'] = proposed\n"
-        "    parts = []\n"
-        "    clamped_after = False\n"
-        "    for pid in ids:\n"
-        "        lim = str(deadlines.get(pid) or '')\n"
-        "        lim_day = _parse(lim)\n"
-        "        prev = _parse(fitted.get(str(pid)))\n"
-        "        cand = prop_day\n"
-        "        if cand is not None and lim_day is not None and cand > lim_day:\n"
-        "            cand = lim_day\n"
-        "            clamped_after = True\n"
-        "        # Never discard a later valid fitted date when a new earlier date is named for another product.\n"
-        "        if prev is not None and (lim_day is None or prev <= lim_day):\n"
-        "            if cand is None or cand < prev:\n"
-        "                cand = prev\n"
-        "        if cand is not None and not _is_bd(cand):\n"
-        "            nxt = _next_bd(cand)\n"
-        "            if lim_day is not None and nxt > lim_day:\n"
-        "                cand = lim_day\n"
-        "                clamped_after = True\n"
-        "            else:\n"
-        "                cand = nxt\n"
-        "        if cand is not None:\n"
-        "            fitted[str(pid)] = cand.isoformat()\n"
-        "            amt = dues.get(pid)\n"
-        "            parts.append(str(pid) + ' amount ' + str(amt) + ' on ' + cand.isoformat())\n"
-        "    vars['fitted_dates_json'] = json.dumps(fitted)\n"
-        "    vars['date_readback'] = '; '.join(parts)\n"
-        "    # Mark proposed_date consumed (never assign '' — Freya date schema rejects it).\n"
-        "    if proposed:\n"
-        "        vars['last_proposed_date'] = proposed\n"
-        "        vars['proposed_date_consumed'] = 'yes'\n"
-        "    # Brief A rule 23: speak deadline once; re-insisting on a later date = flat refusal.\n"
-        "    vars['need_deadline_offer'] = 'no'\n"
-        "    if clamped_after and str(vars.get('deadline_offered') or '') == 'yes':\n"
-        "        vars['deadline_refused'] = 'yes'\n"
-        "        vars['customer_intent'] = 'refuses'\n"
-        "        vars['gate_ok'] = 'no'\n"
-        "        vars['fitted_dates_json'] = '{}'\n"
-        "        vars['instruction'] = (\n"
-        "            'Customer refused the deadline after it was offered. Do not re-offer the deadline. '\n"
-        "            'Treat as flat refusal: persuasion then refused notes / close. '\n"
-        "            'Do not call create_promise for the late date.'\n"
-        "        )\n"
-        "    elif clamped_after:\n"
-        "        vars['deadline_offered'] = 'yes'\n"
-        "        vars['deadline_refused'] = 'no'\n"
-        "        vars['need_deadline_offer'] = 'yes'\n"
-        "        # Bake gate so a clear yes on listen_deadline can create_promise.\n"
-        "        first_pid = str(ids[0]) if ids else 'p1'\n"
-        "        vars['gate_product_id'] = first_pid\n"
-        "        vars['gate_date'] = str(fitted.get(first_pid) or '')\n"
-        "        try:\n"
-        "            vars['gate_amount'] = str(float(dues.get(first_pid)))\n"
-        "        except Exception:\n"
-        "            vars['gate_amount'] = str(dues.get(first_pid) or '')\n"
-        "        vars['gate_ok'] = 'yes'\n"
-        "        spoken_day = str(fitted.get(first_pid) or '')\n"
-        "        spoken_amt = str(dues.get(first_pid) or '')\n"
-        "        vars['deadline_offer_tts'] = (\n"
-        "            'The latest date I can record is ' + spoken_day\n"
-        "            + '. Can you pay the full ' + spoken_amt + ' by then?'\n"
-        "        )\n"
-        "        vars['instruction'] = (\n"
-        "            'Deadline was just offered by TTS. If they confirm, CALL create_promise. '\n"
-        "            'If they refuse or only repeat a later date, that is a flat refusal — do not loop.'\n"
-        "        )\n"
-        "    elif fitted:\n"
-        "        vars['deadline_refused'] = 'no'\n"
-        "        vars['instruction'] = (\n"
-        "            'Use fitted dates per product. Read back: ' + vars['date_readback']\n"
-        "            + '. For products the customer will pay, confirm then CALL create_promise (not add_note). '\n"
-        "            + 'Only after those promises succeed, persuade then note refused products they will not pay. '\n"
-        "            + 'Do not tell them tomorrow is invalid when it is a business day on or before the deadline.'\n"
-        "        )\n"
-        "    else:\n"
-        "        vars['deadline_refused'] = 'no'\n"
-        "except Exception:\n"
-        "    vars['fitted_dates_json'] = vars.get('fitted_dates_json') or '{}'\n"
-        "    vars['deadline_refused'] = 'no'\n"
-        "    vars['need_deadline_offer'] = 'no'\n"
-    )
-    fit_product_dates = _code_node("fit_product_dates", fit_dates_code, "collection")
-    fit_product_dates["passthrough_default_transition"] = "collection"
+    fit_product_dates = _code_node("fit_product_dates", FIT_DATES_CODE, "collection")
     fit_product_dates["transitions"] = [
         {
             "target_node": "track_persuasion",
@@ -913,9 +944,225 @@ def compile_workflow(policy: Dict[str, Any], openapi_path: str | Path) -> Dict[s
             "condition": _or_eq("deadline_refused", "yes"),
         },
         {
+            "target_node": "latch_exact_day",
+            "description": "vague period mis-tagged as a date — ask the exact day",
+            "condition": _or_eq("ask_exact_day", "yes"),
+        },
+        {
             "target_node": "speak_deadline_offer",
-            "description": "speak deadline once (Brief A.23)",
+            "description": "speak deadline once (Brief A.23, single product)",
             "condition": _or_eq("need_deadline_offer", "yes"),
+        },
+        {
+            "target_node": "speak_readback",
+            "description": "spoken read-back of every fitted product/amount/date",
+            "condition": _or_eq("need_readback", "yes"),
+        },
+        _always("collection"),
+    ]
+
+    # Brief A.34 / Brief B.7: one spoken read-back, one confirmation, then create_promise per product.
+    speak_readback = {
+        "name": "speak_readback",
+        "node_type": "conversation",
+        "task_message": "The read-back was spoken. Do not add facts.",
+        "on_enter": {"type": "tts", "text": "{{readback_tts}}"},
+        "passthrough": True,
+        "passthrough_default_transition": "listen_confirm",
+        "disable_inactivity_monitor": True,
+        "max_node_turns": 1,
+        "max_turn_transition": "listen_confirm",
+        "transitions": [_always("listen_confirm")],
+        "tools": [],
+        "extraction_schema": [],
+    }
+    listen_confirm = _conv(
+        "listen_confirm",
+        (
+            "You just read back every promise and asked Do you confirm?. Say nothing until the customer answers.\n"
+            "Promises to record: {{date_readback}}.\n"
+            "If they clearly confirm (yes / I confirm / that works): CALL create_promise once for EACH product listed, "
+            "all in this same turn, using exactly those product_id, amount and date values. Do not speak before the tool results.\n"
+            "If create_promise fails, errors, or returns ok false: CALL create_promise once more immediately with the same values. "
+            "Do not apologize or end the call after a single failure.\n"
+            "If they say no, refuse, name a different date or amount, or ask something else: do not call any tool; the workflow routes it.\n"
+            "If they ask whether you are a robot: say you are Freya Bank's digital assistant.\n"
+            "Never use the word recorded. Obey what_to_do_next on tool results."
+        ),
+        on_enter={"type": "silent"},
+        tools=[create_promise_tool(tools_ir)],
+        extraction=_intent_schema(policy),
+        transitions=[
+            {
+                "target_node": "ack_promise",
+                "description": "promise recorded",
+                "condition": _or_eq("promise_just_ok", "yes"),
+            },
+            {
+                "target_node": "fit_product_dates",
+                "description": "changed the date (Brief A.35)",
+                "condition": _or_eq("customer_intent", "proposes_date", "pays_today"),
+            },
+            {
+                "target_node": "handle_vague",
+                "description": "vague period",
+                "condition": _or_eq("customer_intent", "vague_period"),
+            },
+            {
+                "target_node": "hardship",
+                "description": "hardship",
+                "condition": _or_eq("customer_intent", "hardship"),
+            },
+            {
+                "target_node": "stage_floor",
+                "description": "full amount too much",
+                "condition": _or_eq("customer_intent", "full_too_much"),
+            },
+            {
+                "target_node": "track_persuasion",
+                "description": "did not confirm",
+                "condition": _or_eq("customer_intent", "refuses", "confirm_no", "no_talk"),
+            },
+            {
+                "target_node": "collection",
+                "description": "other terms — dialogue model handles",
+                "condition": _or_eq("customer_intent", "proposes_amount", "restructure", "already_paid", "dispute", "wants_human"),
+            },
+        ],
+        max_turns=6,
+        max_turn_to="collection",
+    )
+
+    # Brief A.21: vague period → ask once for the exact day; still vague → propose the deadline.
+    handle_vague = _code_node("handle_vague", HANDLE_VAGUE_CODE, "collection")
+    handle_vague["transitions"] = [
+        {
+            "target_node": "latch_exact_day",
+            "description": "ask once for the exact day",
+            "condition": _or_eq("ask_exact_day", "yes"),
+        },
+        {
+            "target_node": "speak_deadline_offer",
+            "description": "still vague — propose the deadline (single product)",
+            "condition": _or_eq("need_deadline_offer", "yes"),
+        },
+        {
+            "target_node": "speak_readback",
+            "description": "still vague — propose each product deadline",
+            "condition": _or_eq("need_readback", "yes"),
+        },
+        _always("collection"),
+    ]
+    # Persist the latch in its own code node so a later Freya merge cannot re-ask forever.
+    latch_exact_day = _code_node(
+        "latch_exact_day",
+        (
+            "try:\n"
+            "    vars['exact_day_asked'] = 'yes'\n"
+            "    vars['ask_exact_day'] = 'no'\n"
+            "    vars['period_is_vague'] = 'no'\n"
+            "    if not str(vars.get('vague_tts') or '').strip():\n"
+            "        vars['vague_tts'] = 'What exact day works for you?'\n"
+            "except Exception:\n"
+            "    vars['exact_day_asked'] = 'yes'\n"
+        ),
+        "speak_exact_day",
+    )
+    speak_exact_day = {
+        "name": "speak_exact_day",
+        "node_type": "conversation",
+        "task_message": "The question was spoken. Do not add facts. Do not ask again.",
+        "on_enter": {"type": "tts", "text": "{{vague_tts}}"},
+        "passthrough": True,
+        "passthrough_default_transition": "listen_exact_day",
+        "disable_inactivity_monitor": True,
+        "max_node_turns": 1,
+        "max_turn_transition": "listen_exact_day",
+        "transitions": [_always("listen_exact_day")],
+        "tools": [],
+        "extraction_schema": [],
+    }
+    listen_exact_day = _conv(
+        "listen_exact_day",
+        (
+            "You asked which exact day works. Say nothing until the customer answers; do not propose a date.\n"
+            "If they ask whether you are a robot: say you are Freya Bank's digital assistant.\n"
+            "Do not call any tool. Do not ask 'What exact day works?' again."
+        ),
+        on_enter={
+            "type": "silent",
+            # Re-assert so Freya var merges cannot drop the latch and re-ask forever.
+        },
+        tools=[],
+        extraction=_intent_schema(policy),
+        transitions=[
+            {
+                "target_node": "fit_product_dates",
+                "description": "named an exact day",
+                "condition": _or_eq("customer_intent", "proposes_date", "pays_today"),
+            },
+            {
+                "target_node": "still_vague",
+                "description": "still vague after one ask → propose deadline / next BD",
+                "condition": {
+                    "logic": "or",
+                    "conditions": [
+                        {"variable": "customer_intent", "operator": "equals", "operand": "vague_period"},
+                        {"variable": "period_is_vague", "operator": "equals", "operand": "yes"},
+                    ],
+                },
+            },
+            {
+                "target_node": "hardship",
+                "description": "hardship",
+                "condition": _or_eq("customer_intent", "hardship"),
+            },
+            {
+                "target_node": "stage_floor",
+                "description": "full amount too much",
+                "condition": _or_eq("customer_intent", "full_too_much"),
+            },
+            {
+                "target_node": "track_persuasion",
+                "description": "refused instead",
+                "condition": _or_eq("customer_intent", "refuses", "confirm_no", "no_talk"),
+            },
+        ],
+        max_turns=4,
+        max_turn_to="still_vague",
+    )
+    # Second vague after the one exact-day ask: never re-ask; propose deadline(s).
+    still_vague = _code_node(
+        "still_vague",
+        (
+            "try:\n"
+            "    vars['exact_day_asked'] = 'yes'\n"
+            "    vars['period_is_vague'] = 'no'\n"
+            "except Exception:\n"
+            "    pass\n"
+        ) + HANDLE_VAGUE_CODE,
+        "collection",
+    )
+    still_vague["transitions"] = [
+        {
+            "target_node": "speak_deadline_offer",
+            "description": "propose the deadline (single product)",
+            "condition": _or_eq("need_deadline_offer", "yes"),
+        },
+        {
+            "target_node": "speak_readback",
+            "description": "propose each product deadline",
+            "condition": _or_eq("need_readback", "yes"),
+        },
+        _always("collection"),
+    ]
+
+    accept_persuasion = _code_node("accept_persuasion", ACCEPT_PERSUASION_CODE, "collection")
+    accept_persuasion["transitions"] = [
+        {
+            "target_node": "speak_readback",
+            "description": "read the accepted offer back once",
+            "condition": _or_eq("need_readback", "yes"),
         },
         _always("collection"),
     ]
@@ -942,8 +1189,9 @@ def compile_workflow(policy: Dict[str, Any], openapi_path: str | Path) -> Dict[s
             "If they refuse the deadline, say no, or only repeat a later date: that is a flat refusal "
             "(do NOT re-offer the deadline in a loop).\n"
             "If they ask whether you are a robot: say you are Freya Bank's digital assistant, then continue.\n"
-            "Do not ask how much they can pay. Do not offer a discount."
+            "Do not ask how much they can pay. Do not offer a discount. Never use the word recorded."
         ),
+        on_enter={"type": "silent"},
         tools=[create_promise_tool(tools_ir)],
         extraction=_intent_schema(policy),
         transitions=[
@@ -955,7 +1203,17 @@ def compile_workflow(policy: Dict[str, Any], openapi_path: str | Path) -> Dict[s
             {
                 "target_node": "fit_product_dates",
                 "description": "named another payment date",
-                "condition": _or_eq("customer_intent", "proposes_date"),
+                "condition": _or_eq("customer_intent", "proposes_date", "pays_today"),
+            },
+            {
+                "target_node": "handle_vague",
+                "description": "vague period",
+                "condition": _or_eq("customer_intent", "vague_period"),
+            },
+            {
+                "target_node": "hardship",
+                "description": "hardship",
+                "condition": _or_eq("customer_intent", "hardship"),
             },
             {
                 "target_node": "track_persuasion",
@@ -1131,18 +1389,16 @@ def compile_workflow(policy: Dict[str, Any], openapi_path: str | Path) -> Dict[s
         max_turn_to="close_hardship",
     )
 
-    ack_promise = _code_node(
-        "ack_promise",
-        "try:\n    vars['promise_just_ok'] = 'no'\nexcept Exception:\n    pass\n",
-        "promise_recorded",
-    )
+    ack_promise = _code_node("ack_promise", ACK_PROMISE_CODE, "promise_recorded")
     promise_recorded = {
         "name": "promise_recorded",
         "node_type": "conversation",
         "task_message": "The confirmation was already spoken. Do not add facts.",
         "on_enter": {
             "type": "tts",
-            "text": fixed.get("recorded", "Your payment promise has been recorded.")
+            # ai_prefix: AI disclosure when the customer asked "robot?" in the confirming turn.
+            "text": "{{ai_prefix}}"
+            + fixed.get("recorded", "Your payment promise has been recorded.")
             + " "
             + fixed.get("sms", "You will receive a text message confirming this promise."),
         },
@@ -1175,6 +1431,47 @@ def compile_workflow(policy: Dict[str, Any], openapi_path: str | Path) -> Dict[s
         "    if not isinstance(promised, list):\n"
         "        promised = []\n"
         "    promised = [str(x) for x in promised]\n"
+        "    # Race-safe per-pid markers set by the create_promise post-hook.\n"
+        "    for _raw in ids:\n"
+        "        _sp = str(_raw)\n"
+        "        _s = ''.join(ch if (ch.isalnum() or ch == '_') else '_' for ch in _sp)[:64]\n"
+        "        if _s and str(vars.get('promised_' + _s) or '') == 'yes' and _sp not in promised:\n"
+        "            promised.append(_sp)\n"
+        "    # Parallel create_promise wave: stack/last_promise_pid last-write-wins, so\n"
+        "    # promised_* may miss pids the bank already accepted. When the wave had no\n"
+        "    # failures, credit every promise_attempted_* product (pre-hook per-pid keys).\n"
+        "    _fails = 0\n"
+        "    try:\n"
+        "        _fails = int(float(vars.get('create_promise_failures') or 0))\n"
+        "    except Exception:\n"
+        "        _fails = 0\n"
+        "    if _fails == 0 and str(vars.get('has_promise') or '').lower() == 'true':\n"
+        "        for _raw in ids:\n"
+        "            _sp = str(_raw)\n"
+        "            _s = ''.join(ch if (ch.isalnum() or ch == '_') else '_' for ch in _sp)[:64]\n"
+        "            if _s and str(vars.get('promise_attempted_' + _s) or '') == 'yes' and _sp not in promised:\n"
+        "                promised.append(_sp)\n"
+        "                vars['promised_' + _s] = 'yes'\n"
+        "    try:\n"
+        "        vars['promised_products'] = json.dumps(promised)\n"
+        "    except Exception:\n"
+        "        pass\n"
+        "    fitted_map = vars.get('fitted_dates_json') or {}\n"
+        "    if isinstance(fitted_map, str):\n"
+        "        try:\n"
+        "            fitted_map = json.loads(fitted_map)\n"
+        "        except Exception:\n"
+        "            fitted_map = {}\n"
+        "    if not isinstance(fitted_map, dict):\n"
+        "        fitted_map = {}\n"
+        "    fitted_amts = vars.get('fitted_amounts_json') or {}\n"
+        "    if isinstance(fitted_amts, str):\n"
+        "        try:\n"
+        "            fitted_amts = json.loads(fitted_amts)\n"
+        "        except Exception:\n"
+        "            fitted_amts = {}\n"
+        "    if not isinstance(fitted_amts, dict):\n"
+        "        fitted_amts = {}\n"
         "    noted = []\n"
         "    noted_ids = vars.get('noted_products') or []\n"
         "    if isinstance(noted_ids, str):\n"
@@ -1225,6 +1522,7 @@ def compile_workflow(policy: Dict[str, Any], openapi_path: str | Path) -> Dict[s
         "    vars['continue_collection'] = 'no'\n"
         "    vars['need_notes'] = 'no'\n"
         "    vars['need_persuasion'] = 'no'\n"
+        "    vars['need_write_promises'] = 'no'\n"
         "    if not open_ids:\n"
         "        vars['open_products'] = ''\n"
         "        vars['need_notes'] = 'no'\n"
@@ -1236,6 +1534,20 @@ def compile_workflow(policy: Dict[str, Any], openapi_path: str | Path) -> Dict[s
         "            'CALL add_note exactly once for product_id '\n"
         "            + open_ids[0]\n"
         "            + ' with reason refused. Do not note other products this turn.'\n"
+        "        )\n"
+        "    elif str(vars.get('has_promise') or '').lower() == 'true' and any(str(fitted_map.get(_p) or '') for _p in open_ids):\n"
+        "        # Confirmed read-back covered more products than the model wrote: write the rest now.\n"
+        "        _pend = [_p for _p in open_ids if str(fitted_map.get(_p) or '')]\n"
+        "        vars['open_products'] = ','.join(_pend)\n"
+        "        vars['need_write_promises'] = 'yes'\n"
+        "        vars['customer_intent'] = 'other'\n"
+        "        _lines = []\n"
+        "        for _p in _pend:\n"
+        "            _lines.append(_p + ' amount ' + str(fitted_amts.get(_p) or '') + ' on ' + str(fitted_map.get(_p) or ''))\n"
+        "        vars['date_readback'] = '; '.join(_lines)\n"
+        "        vars['instruction'] = (\n"
+        "            'The customer already confirmed these promises. CALL create_promise now, once for each, without asking again: '\n"
+        "            + vars['date_readback'] + '. Never say recorded yourself. Do not ask about today.'\n"
         "        )\n"
         "    elif str(vars.get('has_promise') or '').lower() == 'true':\n"
         "        vars['open_products'] = ','.join(open_ids)\n"
@@ -1272,6 +1584,11 @@ def compile_workflow(policy: Dict[str, Any], openapi_path: str | Path) -> Dict[s
                 "condition": _or_eq("need_notes", "yes"),
             },
             {
+                "target_node": "write_promises",
+                "description": "finish confirmed fitted promises without re-asking",
+                "condition": _or_eq("need_write_promises", "yes"),
+            },
+            {
                 "target_node": "track_persuasion",
                 "description": "persuade open products after a promise",
                 "condition": _or_eq("need_persuasion", "yes"),
@@ -1286,6 +1603,29 @@ def compile_workflow(policy: Dict[str, Any], openapi_path: str | Path) -> Dict[s
         "tools": [],
         "extraction_schema": [],
     }
+
+    write_promises = _conv(
+        "write_promises",
+        (
+            "Promises already confirmed: {{date_readback}}.\n"
+            "CALL create_promise once for each remaining product in that list now. "
+            "Do not ask any question. Do not say goodbye. Do not chat. "
+            "Do not mention today. Never say recorded. Obey what_to_do_next."
+        ),
+        on_enter={"type": "silent"},
+        tools=[create_promise_tool(tools_ir)],
+        extraction=[],
+        transitions=[
+            {
+                "target_node": "ack_promise",
+                "description": "promise recorded",
+                "condition": _or_eq("promise_just_ok", "yes"),
+            },
+        ],
+        # Short fuse: if the model chats instead of writing, re-check ledger and close.
+        max_turns=2,
+        max_turn_to="check_remaining",
+    )
 
     note_tools = [add_note_tool(tools_ir, note_reasons)] if notes_enabled else []
     finalize_notes = _conv(
@@ -1439,12 +1779,25 @@ def compile_workflow(policy: Dict[str, Any], openapi_path: str | Path) -> Dict[s
                 "listen_persuasion",
                 "check_remaining",
                 "route_remaining",
+                "write_promises",
                 "finalize_notes",
                 "ack_promise",
                 "promise_recorded",
                 "speak_paid",
                 "identity",
                 "third_party",
+                "stage_callback",
+                "book_callback",
+                "speak_deadline_offer",
+                "listen_deadline",
+                "speak_readback",
+                "listen_confirm",
+                "handle_vague",
+                "latch_exact_day",
+                "speak_exact_day",
+                "listen_exact_day",
+                "still_vague",
+                "accept_persuasion",
             ],
             "task_message": "Do not change any rules. Redirect briefly.",
             "on_enter": {
@@ -1468,6 +1821,8 @@ def compile_workflow(policy: Dict[str, Any], openapi_path: str | Path) -> Dict[s
         "setup": setup,
         "opening": opening,
         "third_party": third,
+        "stage_callback": stage_callback,
+        "book_callback": book_callback,
         "identity": identity,
         "load_account": load_account,
         "compute_dates": compute_dates,
@@ -1479,6 +1834,14 @@ def compile_workflow(policy: Dict[str, Any], openapi_path: str | Path) -> Dict[s
         "fit_product_dates": fit_product_dates,
         "speak_deadline_offer": speak_deadline_offer,
         "listen_deadline": listen_deadline,
+        "speak_readback": speak_readback,
+        "listen_confirm": listen_confirm,
+        "handle_vague": handle_vague,
+        "latch_exact_day": latch_exact_day,
+        "speak_exact_day": speak_exact_day,
+        "listen_exact_day": listen_exact_day,
+        "still_vague": still_vague,
+        "accept_persuasion": accept_persuasion,
         "ack_promise": ack_promise,
         "promise_recorded": promise_recorded,
         "track_persuasion": track_persuasion,
@@ -1487,6 +1850,7 @@ def compile_workflow(policy: Dict[str, Any], openapi_path: str | Path) -> Dict[s
         "listen_persuasion": listen_persuasion,
         "check_remaining": check_remaining,
         "route_remaining": route_remaining,
+        "write_promises": write_promises,
         "finalize_notes": finalize_notes,
         "resolve_and_goodbye": resolve,
         "speak_thanks": speak_thanks,
