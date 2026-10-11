@@ -7,7 +7,7 @@
     }
   ],
   "repo": "https://github.com/hadihassan04/build-the-builder",
-  "commit": "e722f42",
+  "commit": "7b84049",
   "run_command": "python3 builder/build.py {case_folder} {mock_url} --live-test",
   "workflow": "submission/final.workflow.json",
   "trace": "traces/final.log",
