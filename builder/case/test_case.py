@@ -118,6 +118,13 @@ class Engine:
                     # Preserve the old setup shorthand: no explicit opening
                     # answer means the caller wants the statement flow.
                     t = {"customer_intent": "answer"}
+                elif not turns and node["name"] == "speak_q":
+                    # The live workflow asks the question and waits for a
+                    # caller turn in this node. For a local checkpoint that
+                    # only wants to inspect the newly rendered question,
+                    # record the prompt and leave the engine waiting.
+                    self.spoken.append(str(self.vars.get("question_tts", "")))
+                    return
                 elif not turns:
                     return  # waiting for the caller
                 else:

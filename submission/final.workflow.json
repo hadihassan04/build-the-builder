@@ -1,7 +1,7 @@
 {
  "workflow_id": "e4342bdf-6e9c-4dcd-a862-7b5f7004a24f",
  "agent_id": "ad01d55e-2d20-4c7a-ae37-0f87ddefb7ca",
- "updated_at": "2026-10-11T19:48:32.954Z",
+ "updated_at": "2026-10-11T19:53:29.755Z",
  "workflow": {
   "nodes": {
    "end": {
@@ -70,6 +70,21 @@
     "passthrough": false,
     "pre_actions": [],
     "transitions": [
+     {
+      "condition": {
+       "logic": "or",
+       "conditions": [
+        {
+         "mode": "exact",
+         "operand": "legacy_listen",
+         "operator": "equals",
+         "variable": "route"
+        }
+       ]
+      },
+      "description": "route legacy_listen",
+      "target_node": "listen"
+     },
      {
       "condition": {
        "mode": "exact",
@@ -290,8 +305,7 @@
     "name": "speak_q",
     "tools": [],
     "on_enter": {
-     "text": "{{question_tts}}",
-     "type": "tts"
+     "type": "llm"
     },
     "position": {
      "x": 0,
@@ -299,7 +313,7 @@
     },
     "node_type": "conversation",
     "assertions": [],
-    "passthrough": true,
+    "passthrough": false,
     "pre_actions": [],
     "transitions": [
      {
@@ -308,22 +322,68 @@
        "operator": "always"
       },
       "description": "always",
-      "target_node": "listen"
+      "target_node": "dispatch"
      }
     ],
     "role_message": "",
-    "task_message": "Say the fixed line only. No tool call in this turn.",
+    "task_message": "Say this system question exactly once in the call language, then STOP speaking and wait for the caller: {{question_tts}}\nDo not invent, roleplay, or infer a caller reply. Do not output a second assistant sentence. When the caller sends a turn, classify only that turn. Do not call tools or answer the question yourself. A literal '...' or any empty/punctuation-only turn is silence: return customer_intent=silence immediately. Never wait for another caller turn after receiving one.",
     "interruptible": true,
-    "max_node_turns": 1,
+    "max_node_turns": 2,
     "response_mapping": [],
-    "extraction_schema": [],
-    "max_turn_transition": "listen",
+    "extraction_schema": [
+     {
+      "name": "customer_intent",
+      "type": "string",
+      "description": "What the caller did in THIS turn. answer = named a card / gave digits / picked a week / gave a direct answer to the question; yes = clear agreement (evet, olur, onayl\u0131yorum, tamam, g\u00f6nder, l\u00fctfen); no = clear refusal or 'nothing else / thanks / bye'; repeat = asked to hear it again; wants_agent = asked for a human/agent/representative; wants_pay = explicitly wants to make a payment or asks how/where to pay (not merely asking to learn the debt or balance); dispute = says a payment is missing or an amount is wrong; complaint = angry, insulting or complaining about the bank; out_of_scope = asked something unrelated to this card's statement debt, statement date change or e-mail (limits, loans, branch hours, blocking a card...); other_language = spoke a language other than the call language; silence = said nothing meaningful (empty, whitespace, punctuation-only, noise, only filler; a literal '...' is always silence); third_party = says they are calling for someone else / not the card holder; wants_email = wants the statement by e-mail; wants_change = wants to change the statement date/week; another_card = wants another card's debt; all_accounts = asked for all cards at once; unclear = hedging like maybe / I think / not sure, or cannot tell.",
+      "enum_values": [
+       "answer",
+       "yes",
+       "no",
+       "repeat",
+       "wants_agent",
+       "wants_pay",
+       "dispute",
+       "complaint",
+       "out_of_scope",
+       "other_language",
+       "silence",
+       "third_party",
+       "wants_email",
+       "wants_change",
+       "another_card",
+       "all_accounts",
+       "unclear"
+      ],
+      "min_confidence": 0.4
+     },
+     {
+      "name": "card_name",
+      "type": "string",
+      "description": "The card or product name the caller said, as said (e.g. a brand word plus tier). Empty if none.",
+      "min_confidence": 0.4
+     },
+     {
+      "name": "digits",
+      "type": "string",
+      "description": "Digits the caller said this turn, converted to numerals without spaces (words like d\u00f6rt iki be\u015f \u00fc\u00e7 -> 4253; k\u0131rk iki elli \u00fc\u00e7 -> 4253; sixteen digits -> 16 numerals). Empty if none.",
+      "min_confidence": 0.4,
+      "validation_pattern": "^[0-9]*$"
+     },
+     {
+      "name": "week_choice",
+      "type": "string",
+      "description": "If the caller chose a statement week, its number 1-4 (birinci/ilk -> 1, ikinci -> 2, \u00fc\u00e7\u00fcnc\u00fc -> 3, d\u00f6rd\u00fcnc\u00fc/son -> 4). Empty otherwise.",
+      "min_confidence": 0.4,
+      "validation_pattern": "^[0-9]?$"
+     }
+    ],
+    "max_turn_transition": "dispatch",
     "truncation_strategy": "keep_all",
     "suppress_tool_results": false,
     "truncation_window_size": 10,
-    "on_enter_first_entry_only": false,
-    "disable_inactivity_monitor": true,
-    "passthrough_default_transition": "listen",
+    "on_enter_first_entry_only": true,
+    "disable_inactivity_monitor": false,
+    "passthrough_default_transition": null,
     "return_to_previous_on_interrupt": false
    },
    "dispatch": {

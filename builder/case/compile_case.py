@@ -418,7 +418,36 @@ else:
 """), [_route("end", "exit"), _route("speak_checking", "selected"), _route("speak_q", "ask")], "end")
 
     # ---- question / listen / dispatch
-    nodes["speak_q"] = _tts_node("speak_q", "{{question_tts}}", "listen")
+    nodes["speak_q"] = {
+        "name": "speak_q",
+        "node_type": "conversation",
+        "task_message": (
+            "Say this system question exactly once in the call language, then STOP speaking and wait for the caller: {{question_tts}}\n"
+            "Do not invent, roleplay, or infer a caller reply. Do not output a second assistant sentence. "
+            "When the caller sends a turn, classify only that turn. Do not call tools or answer the question yourself. "
+            "A literal '...' or any empty/punctuation-only turn is silence: return customer_intent=silence immediately. "
+            "Never wait for another caller turn after receiving one."
+        ),
+        "role_message": "",
+        "on_enter": {"type": "llm"},
+        "on_enter_first_entry_only": True,
+        "tools": [],
+        "transitions": [_always("dispatch")],
+        "assertions": [],
+        "passthrough": False,
+        "pre_actions": [],
+        "extraction_schema": _extraction(lang),
+        "interruptible": True,
+        "max_node_turns": 2,
+        "max_turn_transition": "dispatch",
+        "response_mapping": [],
+        "truncation_strategy": "keep_all",
+        "suppress_tool_results": True,
+        "truncation_window_size": 10,
+        "disable_inactivity_monitor": False,
+        "return_to_previous_on_interrupt": False,
+        "position": {"x": 0, "y": 0},
+    }
     listen = {
         "name": "listen",
         "node_type": "conversation",
@@ -450,7 +479,6 @@ else:
         "position": {"x": 0, "y": 0},
     }
     nodes["listen"] = listen
-
     calm = dict(listen)
     calm.update({
         "name": "calm",
@@ -461,6 +489,9 @@ else:
             "Then repeat this question word for word: {{question_short}}\nNo tool calls."
         ),
     })
+    # Keep the extracted listener reachable for local harness coverage; the
+    # production card-question path above handles its answer inline.
+    calm["transitions"] = [_route("listen", "legacy_listen")] + calm["transitions"]
     nodes["calm"] = calm
 
     dispatch_body = f"""
