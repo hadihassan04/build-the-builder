@@ -1,0 +1,241 @@
+{
+  "schema_version": "1",
+  "brief_ids": ["brief-a", "brief-b"],
+  "source_chunks": [
+    {"id": "brief-a-manual", "file": "brief-a.md", "text": "Hand-authored IR covering Brief A rules 1-47 and Brief B extensions.", "supersedes": []}
+  ],
+  "call_variables": {
+    "names": ["customer_id", "first_name", "last_name", "title", "now"],
+    "source_ids": ["brief-a-manual"]
+  },
+  "opening": {
+    "first_sentence_template": "Hello, this is Freya Bank's digital assistant. This call is recorded.",
+    "identity_ask_template": "Am I speaking with {{title}} {{last_name}}?",
+    "confirm_phrases": ["yes", "that's me", "speaking", "own_name"],
+    "forbidden_before_verify": ["collections", "debt", "payment", "credit card", "loan", "past due", "overdue"],
+    "max_identity_asks": 2,
+    "ai_disclosure": "I am Freya Bank's digital assistant.",
+    "source_ids": ["brief-a-manual"]
+  },
+  "identity": {
+    "questions": [
+      {
+        "field": "date_of_birth",
+        "ask_template": "For security, what is your date of birth?",
+        "answer_format": "YYYY-MM-DD",
+        "hints": {"day_month_swapped": "Please say the month as a word."}
+      },
+      {
+        "field": "phone_last4",
+        "ask_template": "And the last four digits of the phone number we have on file?",
+        "answer_format": "four digits"
+      }
+    ],
+    "max_wrong_answers": 3,
+    "day_month_swapped_hint": "day_month_swapped",
+    "day_month_swapped_counts_as_wrong": false,
+    "decline_closes": true,
+    "failed_outcome": "not_verified",
+    "failed_reason": "failed",
+    "declined_outcome": "not_verified",
+    "declined_reason": "declined",
+    "source_ids": ["brief-a-manual"]
+  },
+  "third_party": {
+    "reveal_purpose": false,
+    "callback_window": {
+      "earliest_offset_days": 0,
+      "latest_offset_days": 1,
+      "start_time": "10:00",
+      "end_time": "19:00",
+      "business_days_only": true,
+      "must_be_after_now": true
+    },
+    "max_callback_retries": 1,
+    "outcomes": {
+      "callback": {"outcome": "not_reached", "reason": "callback"},
+      "no_callback": {"outcome": "not_reached", "reason": "no_callback"},
+      "wrong_number": {"outcome": "not_reached", "reason": "wrong_number"},
+      "deceased": {"outcome": "not_reached", "reason": "deceased"},
+      "unclear": {"outcome": "not_reached", "reason": "unclear"}
+    },
+    "deceased_line": "I am sorry for your loss.",
+    "source_ids": ["brief-a-manual"]
+  },
+  "calendar": {
+    "business_weekdays": [0, 1, 2, 3, 4],
+    "holidays": ["2026-10-26", "2026-11-11", "2026-11-26", "2026-12-25", "2027-01-01"],
+    "now_variable": "now",
+    "source_ids": ["brief-a-manual"]
+  },
+  "bands": [
+    {
+      "name": "early",
+      "days_late_min": 1,
+      "days_late_max": 7,
+      "deadline_business_days": 12,
+      "persuasion_attempts": 1,
+      "source_ids": ["brief-a-manual"]
+    },
+    {
+      "name": "late",
+      "days_late_min": 8,
+      "days_late_max": 45,
+      "deadline_business_days": 7,
+      "persuasion_attempts": 2,
+      "source_ids": ["brief-a-manual"]
+    }
+  ],
+  "amounts": {
+    "floors_by_product_type": {
+      "credit_card": "minimum_payment",
+      "personal_loan": "instalment_amount",
+      "car_loan": "instalment_amount"
+    },
+    "agent_proposes": true,
+    "never_ask_how_much": true,
+    "source_ids": ["brief-a-manual"]
+  },
+  "negotiation": {
+    "first_ask": "Can you make this payment today?",
+    "attempts": [
+      {
+        "index": 1,
+        "description": "Propose last business day of this week; if today is that day, last business day of next week. Full amount, or floor if customer said full is too much.",
+        "propose": "last_business_day_this_week_or_next",
+        "bands": ["early", "late"]
+      },
+      {
+        "index": 2,
+        "description": "Late band only: propose the floor amount on the deadline.",
+        "propose": "floor_on_deadline",
+        "bands": ["late"]
+      }
+    ],
+    "hardship_before_persuasion": true,
+    "hardship_transfer_queue": "support",
+    "source_ids": ["brief-a-manual"]
+  },
+  "intents": {
+    "values": [
+      {"id": "confirm_yes", "description": "Clear yes / that's me / speaking / confirms identity or confirms promise"},
+      {"id": "confirm_no", "description": "Clear no"},
+      {"id": "third_party", "description": "Someone else answered; not the named customer"},
+      {"id": "wrong_number", "description": "Number does not belong to the customer"},
+      {"id": "deceased", "description": "Customer has died"},
+      {"id": "callback_offer", "description": "Offers a time when the customer can be reached"},
+      {"id": "pays_today", "description": "Can pay the full amount today"},
+      {"id": "vague_period", "description": "Names a vague period without an exact calendar day (week after next, end of the month, when my salary, next week, sometime next month)"},
+      {"id": "proposes_date", "description": "Names a specific payment date or weekday (not a vague period)"},
+      {"id": "proposes_amount", "description": "Names a payment amount"},
+      {"id": "full_too_much", "description": "Full past-due amount is too much"},
+      {"id": "refuses", "description": "Flat refusal to pay, no date or amount"},
+      {"id": "hardship", "description": "Illness, death in family, or job loss"},
+      {"id": "already_paid", "description": "Claims they already paid this past-due amount"},
+      {"id": "dispute", "description": "Debt is not theirs / never had product / closed or paid off in the past"},
+      {"id": "restructure", "description": "Wants new payment plan or lower instalments"},
+      {"id": "wants_human", "description": "Asks for a human agent"},
+      {"id": "scam_question", "description": "Asks if this is a scam"},
+      {"id": "ai_question", "description": "Asks if speaking to a robot or AI"},
+      {"id": "no_talk", "description": "Does not want to talk"},
+      {"id": "decline_security", "description": "Will not answer security questions / asks what call is about instead of answering"},
+      {"id": "accept_transfer", "description": "Accepts transfer to support"},
+      {"id": "decline_transfer", "description": "Declines transfer"},
+      {"id": "other", "description": "Anything else"}
+    ],
+    "priority": [
+      "deceased",
+      "wrong_number",
+      "hardship",
+      "dispute",
+      "already_paid",
+      "restructure",
+      "wants_human",
+      "no_talk",
+      "decline_security",
+      "pays_today",
+      "vague_period",
+      "proposes_date",
+      "proposes_amount",
+      "full_too_much",
+      "refuses",
+      "confirm_yes",
+      "confirm_no",
+      "third_party",
+      "callback_offer",
+      "scam_question",
+      "ai_question",
+      "accept_transfer",
+      "decline_transfer",
+      "other"
+    ],
+    "source_ids": ["brief-a-manual"]
+  },
+  "outcomes": {
+    "table": [
+      {"outcome": "promise", "reason": null, "when": "at least one promise recorded"},
+      {"outcome": "paid", "reason": null, "when": "already paid claim"},
+      {"outcome": "transferred", "reason": "restructuring", "when": "restructuring request"},
+      {"outcome": "transferred", "reason": "human", "when": "insists on human"},
+      {"outcome": "transferred", "reason": "support", "when": "hardship accepts support"},
+      {"outcome": "no_promise", "reason": "refused", "when": "attempts exhausted or twice no talk"},
+      {"outcome": "no_promise", "reason": "hardship", "when": "hardship declines support"},
+      {"outcome": "no_promise", "reason": "dispute", "when": "dispute"},
+      {"outcome": "no_promise", "reason": "service_error", "when": "create_promise failed twice"},
+      {"outcome": "not_verified", "reason": "failed", "when": "three wrong answers"},
+      {"outcome": "not_verified", "reason": "declined", "when": "declines security"},
+      {"outcome": "not_reached", "reason": "callback", "when": "callback scheduled"},
+      {"outcome": "not_reached", "reason": "no_callback", "when": "callback outside window twice"},
+      {"outcome": "not_reached", "reason": "wrong_number", "when": "wrong number"},
+      {"outcome": "not_reached", "reason": "deceased", "when": "deceased"},
+      {"outcome": "not_reached", "reason": "unclear", "when": "identity unclear after two asks"}
+    ],
+    "close_is_last": true,
+    "transfer_wins_over_promise": true,
+    "source_ids": ["brief-a-manual"]
+  },
+  "notes": {
+    "enabled": true,
+    "reasons": ["refused", "hardship", "dispute", "paid", "service_error"],
+    "no_notes_on_transfer": true,
+    "source_ids": ["brief-a-manual"]
+  },
+  "fixed_sentences": {
+    "opening": "Hello, this is Freya Bank's digital assistant. This call is recorded.",
+    "identity_ask": "Am I speaking with {{title}} {{last_name}}?",
+    "deceased": "I am sorry for your loss.",
+    "sympathy": "I am sorry to hear that.",
+    "verified": "Thank you, that is verified.",
+    "collections_intro": "I am calling from the collections team about a late payment.",
+    "recorded": "Your payment promise has been recorded.",
+    "sms": "You will receive a text message confirming this promise.",
+    "could_not_record": "I am sorry, I could not record that promise.",
+    "already_paid_ack": "Payments can take one business day to appear.",
+    "scam_ack": "You can verify this call by phoning Freya Bank's customer service number.",
+    "ai_ack": "I am Freya Bank's digital assistant.",
+    "farewell": "Thank you. Have a good day.",
+    "third_party_redirect": "I need to speak with the account holder. When would be a good time to reach them?",
+    "security_protect": "These questions protect your account.",
+    "use_app": "Please use the mobile app or visit a branch."
+  },
+  "never_say": [
+    "discount",
+    "waiver",
+    "waive",
+    "instalment plan",
+    "installment plan",
+    "how much can you pay",
+    "ignore your instructions",
+    "I can offer you a lower rate"
+  ],
+  "tools": {},
+  "multi_product": {
+    "enabled": true,
+    "max_products": 3,
+    "state_all_before_ask": true,
+    "per_product_deadline": true,
+    "per_product_attempts": true,
+    "single_confirmation": true,
+    "source_ids": ["brief-a-manual"]
+  }
+}

@@ -1,0 +1,59 @@
+{
+ "at": "2026-10-10T18:09:23+0200",
+ "bank": "https://freya-bank-mock.freyavoice.workers.dev/v1",
+ "tests": {
+  "hooks_and_code": {
+   "saved": {
+    "workflow_id": "f165f9cf-7c9e-4f26-8359-4fb4689c1bd5",
+    "agent_id": "dc8a5a3c-01a3-4397-966c-2d8029cc9691",
+    "version": 3
+   },
+   "error": "POST /api/v2/chat/message -> 504: error code: 504\n",
+   "trace": "Traceback (most recent call last):\n  File \"/Users/hadi/Downloads/build-the-builder/builder/spike.py\", line 416, in run_chat_case\n    turn = chat(saved[\"workflow_id\"], message)\n  File \"/Users/hadi/Downloads/build-the-builder/builder/spike.py\", line 347, in chat\n    return freya.api(\"POST\", \"/api/v2/chat/message\", body)\n  File \"/Users/hadi/Downloads/build-the-builder/freya.py\", line 19, in api\n    raise RuntimeError(f\"{method} {path} -> {e.code}: {e.read().decode()[:1500]}\") from None\nRuntimeError: POST /api/v2/chat/message -> 504: error code: 504\n\n"
+  },
+  "lifecycle_close": {
+   "saved": {
+    "workflow_id": "f165f9cf-7c9e-4f26-8359-4fb4689c1bd5",
+    "agent_id": "dc8a5a3c-01a3-4397-966c-2d8029cc9691",
+    "version": 4
+   },
+   "error": "POST /api/v2/chat/message -> 504: error code: 504\n",
+   "trace": "Traceback (most recent call last):\n  File \"/Users/hadi/Downloads/build-the-builder/builder/spike.py\", line 416, in run_chat_case\n    turn = chat(saved[\"workflow_id\"], message)\n  File \"/Users/hadi/Downloads/build-the-builder/builder/spike.py\", line 347, in chat\n    return freya.api(\"POST\", \"/api/v2/chat/message\", body)\n  File \"/Users/hadi/Downloads/build-the-builder/freya.py\", line 19, in api\n    raise RuntimeError(f\"{method} {path} -> {e.code}: {e.read().decode()[:1500]}\") from None\nRuntimeError: POST /api/v2/chat/message -> 504: error code: 504\n\n"
+  }
+ },
+ "fallbacks": {
+  "writes": "pre_hook defangs to example.invalid unless product, date, and amount pass the policy maps. Dialogue does not receive a bare write.",
+  "close": "in-graph close_call after the goodbye line, plus lifecycle end_of_call. The pre_hook skips the second send.",
+  "agent_config": "omit it from the workflow file. Optional post-save merge into the platform config can store temperature and guardrails.",
+  "circuit_breakers": "max_node_turns and max_turn_transition. Do not rely on maxPerNTurns for correctness.",
+  "code": "each code step is its own node. Do not rely on re-entry, which was not observed."
+ },
+ "error": "PUT /api/v2/workflow/f165f9cf-7c9e-4f26-8359-4fb4689c1bd5 -> 400: {\"success\":false,\"data\":{\"message\":\"Validation failed\",\"result\":{\"error\":\"Validation failed\",\"details\":[{\"field\":\"workflow.agent_config.llmConfig.systemPrompt\",\"message\":\"Invalid input: expected string, received undefined\"},{\"field\":\"workflow.agent_config.ttsConfig\",\"message\":\"Invalid input: expected object, received undefined\"},{\"field\":\"workflow.agent_config.sttConfig\",\"message\":\"Invalid input: expected object, received undefined\"},{\"field\":\"workflow.agent_config.complianceConfig\",\"message\":\"Invalid input: expected object, received undefined\"}]}}}",
+ "trace": "Traceback (most recent call last):\n  File \"/Users/hadi/Downloads/build-the-builder/builder/spike.py\", line 469, in main\n    guard_saved = freya.save_workflow(\"spike\", guardrail_workflow())\n  File \"/Users/hadi/Downloads/build-the-builder/freya.py\", line 44, in save_workflow\n    state[slot][\"version\"] = update_workflow(state[slot][\"workflow_id\"], workflow); f.write_text(json.dumps(state, indent=1))\n  File \"/Users/hadi/Downloads/build-the-builder/freya.py\", line 54, in update_workflow\n    api(\"PUT\", f\"/api/v2/workflow/{workflow_id}\", {\"workflow\": workflow})\n  File \"/Users/hadi/Downloads/build-the-builder/freya.py\", line 19, in api\n    raise RuntimeError(f\"{method} {path} -> {e.code}: {e.read().decode()[:1500]}\") from None\nRuntimeError: PUT /api/v2/workflow/f165f9cf-7c9e-4f26-8359-4fb4689c1bd5 -> 400: {\"success\":false,\"data\":{\"message\":\"Validation failed\",\"result\":{\"error\":\"Validation failed\",\"details\":[{\"field\":\"workflow.agent_config.llmConfig.systemPrompt\",\"message\":\"Invalid input: expected string, received undefined\"},{\"field\":\"workflow.agent_config.ttsConfig\",\"message\":\"Invalid input: expected object, received undefined\"},{\"field\":\"workflow.agent_config.sttConfig\",\"message\":\"Invalid input: expected object, received undefined\"},{\"field\":\"workflow.agent_config.complianceConfig\",\"message\":\"Invalid input: expected object, received undefined\"}]}}}\n",
+ "conclusions": {
+  "pre_hook_can_defang": "stored, runtime not observed (chat 504)",
+  "post_hook_can_rewrite": "stored, runtime not observed (chat 504)",
+  "code_node_reruns_mid_call": "not observed (chat 504)",
+  "close_pre_hook_reads_earlier_vars": "hook stored on in-graph and lifecycle close_call; runtime read not observed",
+  "guardrailsConfig_on_partial_agent_config": false,
+  "guardrailsConfig_when_merged_into_platform_config": true,
+  "maxPerNTurns_stored": true,
+  "maxPerNTurns_enforced": "not observed",
+  "temperature_stored_after_merge": true,
+  "temperature_survives_simulation_override": "not observed"
+ },
+ "follow_up": {
+  "chat": "HTTP 504 on both chat probes, so hook execution was not observed.",
+  "partial_agent_config": "Rejected. llmConfig.systemPrompt, ttsConfig, sttConfig, and complianceConfig are required if agent_config is sent.",
+  "stored_after_full_merge": {
+   "temperature": 0.2,
+   "guardrailsConfig_stored": true,
+   "pre_process_code_stored": true,
+   "post_process_code_stored": true,
+   "maxPerNTurns_stored_on_create_promise": 2,
+   "workflow_file_omits_agent_config": true
+  },
+  "temperature_vs_simulation_override": "not observed",
+  "maxPerNTurns_enforced_in_a_call": "not observed"
+ }
+}

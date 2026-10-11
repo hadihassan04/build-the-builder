@@ -1,0 +1,44 @@
+# Secrets — never commit
+.env
+.env.*
+env.sh
+!.env.example
+!env.example
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Freya local state (workspace-specific)
+.freya-agents.json
+.personas.json
+
+# Build / run artefacts (keep submission/ and traces/final.log when submitting)
+out/
+results/
+traces/*
+!traces/.gitkeep
+!traces/final.log
+
+# Final case materials (do not bake into the builder)
+FreyaBank-*/
+*-Ekstre-*/
+final-case/
+case/
+
+# Cloudflare Wrangler
+mock/.wrangler/
+mock/node_modules/
+mock/dist/
+
+# Optional large local datasets
+synthetic-test-set.json

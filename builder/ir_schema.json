@@ -1,0 +1,297 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "builder/ir_schema.json",
+  "title": "FreyaPhoneAgentPolicyIR",
+  "description": "Generic policy intermediate representation. No brief-specific values are hardcoded here; every concrete field in a policy instance must carry source_ids citing brief chunks.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "call_variables",
+    "opening",
+    "identity",
+    "third_party",
+    "calendar",
+    "bands",
+    "amounts",
+    "negotiation",
+    "intents",
+    "outcomes",
+    "notes",
+    "fixed_sentences",
+    "never_say",
+    "tools",
+    "multi_product"
+  ],
+  "properties": {
+    "schema_version": { "type": "string", "const": "1" },
+    "brief_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Brief file stems this policy was extracted from."
+    },
+    "source_chunks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "file", "text"],
+        "properties": {
+          "id": { "type": "string" },
+          "file": { "type": "string" },
+          "text": { "type": "string" },
+          "supersedes": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    },
+    "call_variables": {
+      "type": "object",
+      "required": ["names", "source_ids"],
+      "properties": {
+        "names": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Names of call variables available at start (e.g. customer_id, now)."
+        },
+        "source_ids": { "$ref": "#/$defs/source_ids" }
+      }
+    },
+    "opening": {
+      "type": "object",
+      "required": ["first_sentence_template", "identity_ask_template", "confirm_phrases", "forbidden_before_verify", "max_identity_asks", "source_ids"],
+      "properties": {
+        "first_sentence_template": { "type": "string" },
+        "identity_ask_template": { "type": "string" },
+        "confirm_phrases": { "type": "array", "items": { "type": "string" } },
+        "forbidden_before_verify": { "type": "array", "items": { "type": "string" } },
+        "max_identity_asks": { "type": "integer", "minimum": 1 },
+        "ai_disclosure": { "type": "string" },
+        "source_ids": { "$ref": "#/$defs/source_ids" }
+      }
+    },
+    "identity": {
+      "type": "object",
+      "required": ["questions", "max_wrong_answers", "decline_closes", "source_ids"],
+      "properties": {
+        "questions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["field", "ask_template"],
+            "properties": {
+              "field": { "type": "string" },
+              "ask_template": { "type": "string" },
+              "answer_format": { "type": "string" },
+              "hints": {
+                "type": "object",
+                "additionalProperties": { "type": "string" }
+              }
+            }
+          }
+        },
+        "max_wrong_answers": { "type": "integer", "minimum": 1 },
+        "day_month_swapped_hint": { "type": "string" },
+        "day_month_swapped_counts_as_wrong": { "type": "boolean", "default": false },
+        "decline_closes": { "type": "boolean" },
+        "failed_outcome": { "type": "string" },
+        "failed_reason": { "type": "string" },
+        "declined_outcome": { "type": "string" },
+        "declined_reason": { "type": "string" },
+        "source_ids": { "$ref": "#/$defs/source_ids" }
+      }
+    },
+    "third_party": {
+      "type": "object",
+      "required": ["callback_window", "outcomes", "source_ids"],
+      "properties": {
+        "reveal_purpose": { "type": "boolean", "default": false },
+        "callback_window": {
+          "type": "object",
+          "required": ["earliest_offset_days", "latest_offset_days", "start_time", "end_time", "business_days_only"],
+          "properties": {
+            "earliest_offset_days": { "type": "integer" },
+            "latest_offset_days": { "type": "integer" },
+            "start_time": { "type": "string", "pattern": "^\\d{2}:\\d{2}$" },
+            "end_time": { "type": "string", "pattern": "^\\d{2}:\\d{2}$" },
+            "business_days_only": { "type": "boolean" },
+            "must_be_after_now": { "type": "boolean", "default": true }
+          }
+        },
+        "max_callback_retries": { "type": "integer", "default": 1 },
+        "outcomes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "outcome": { "type": "string" },
+              "reason": { "type": "string" }
+            }
+          }
+        },
+        "deceased_line": { "type": "string" },
+        "source_ids": { "$ref": "#/$defs/source_ids" }
+      }
+    },
+    "calendar": {
+      "type": "object",
+      "required": ["business_weekdays", "holidays", "now_variable", "source_ids"],
+      "properties": {
+        "business_weekdays": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0, "maximum": 6 },
+          "description": "0=Monday .. 6=Sunday"
+        },
+        "holidays": { "type": "array", "items": { "type": "string", "format": "date" } },
+        "now_variable": { "type": "string", "default": "now" },
+        "source_ids": { "$ref": "#/$defs/source_ids" }
+      }
+    },
+    "bands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "days_late_min", "days_late_max", "deadline_business_days", "persuasion_attempts", "source_ids"],
+        "properties": {
+          "name": { "type": "string" },
+          "days_late_min": { "type": "integer" },
+          "days_late_max": { "type": "integer" },
+          "deadline_business_days": { "type": "integer" },
+          "persuasion_attempts": { "type": "integer" },
+          "source_ids": { "$ref": "#/$defs/source_ids" }
+        }
+      }
+    },
+    "amounts": {
+      "type": "object",
+      "required": ["floors_by_product_type", "agent_proposes", "source_ids"],
+      "properties": {
+        "floors_by_product_type": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Map product type to the account field that is the amount floor. Values come from the brief, not from this schema."
+        },
+        "agent_proposes": { "type": "boolean" },
+        "never_ask_how_much": { "type": "boolean", "default": true },
+        "source_ids": { "$ref": "#/$defs/source_ids" }
+      }
+    },
+    "negotiation": {
+      "type": "object",
+      "required": ["first_ask", "attempts", "source_ids"],
+      "properties": {
+        "first_ask": { "type": "string" },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["index", "description"],
+            "properties": {
+              "index": { "type": "integer" },
+              "description": { "type": "string" },
+              "propose": {
+                "type": "string",
+                "enum": ["last_business_day_this_week_or_next", "floor_on_deadline", "deadline", "custom"]
+              },
+              "bands": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "hardship_before_persuasion": { "type": "boolean", "default": true },
+        "hardship_transfer_queue": { "type": "string" },
+        "source_ids": { "$ref": "#/$defs/source_ids" }
+      }
+    },
+    "intents": {
+      "type": "object",
+      "required": ["values", "priority", "source_ids"],
+      "properties": {
+        "values": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "description"],
+            "properties": {
+              "id": { "type": "string" },
+              "description": { "type": "string" }
+            }
+          }
+        },
+        "priority": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Highest priority first when multiple intents match."
+        },
+        "source_ids": { "$ref": "#/$defs/source_ids" }
+      }
+    },
+    "outcomes": {
+      "type": "object",
+      "required": ["table", "close_is_last", "source_ids"],
+      "properties": {
+        "table": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["outcome", "when"],
+            "properties": {
+              "outcome": { "type": "string" },
+              "reason": { "type": ["string", "null"] },
+              "when": { "type": "string" }
+            }
+          }
+        },
+        "close_is_last": { "type": "boolean" },
+        "transfer_wins_over_promise": { "type": "boolean", "default": true },
+        "source_ids": { "$ref": "#/$defs/source_ids" }
+      }
+    },
+    "notes": {
+      "type": "object",
+      "required": ["enabled", "reasons", "source_ids"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "reasons": { "type": "array", "items": { "type": "string" } },
+        "no_notes_on_transfer": { "type": "boolean", "default": true },
+        "source_ids": { "$ref": "#/$defs/source_ids" }
+      }
+    },
+    "fixed_sentences": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Named fixed TTS lines (opening, sympathy, recorded, sms, farewell, etc.)."
+    },
+    "never_say": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Forbidden phrases for output rails / prompts (discount, waiver, etc.)."
+    },
+    "tools": {
+      "type": "object",
+      "description": "Filled by the deterministic openapi parser, not by the LLM.",
+      "properties": {
+        "base_url": { "type": "string" },
+        "names": { "type": "array", "items": { "type": "string" } },
+        "by_name": { "type": "object" }
+      }
+    },
+    "multi_product": {
+      "type": "object",
+      "required": ["enabled", "source_ids"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "max_products": { "type": "integer" },
+        "state_all_before_ask": { "type": "boolean" },
+        "per_product_deadline": { "type": "boolean" },
+        "per_product_attempts": { "type": "boolean" },
+        "single_confirmation": { "type": "boolean" },
+        "source_ids": { "$ref": "#/$defs/source_ids" }
+      }
+    }
+  },
+  "$defs": {
+    "source_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "Chunk ids from source_chunks that justify this field."
+    }
+  }
+}

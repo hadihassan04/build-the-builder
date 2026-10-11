@@ -1,0 +1,6 @@
+name = "freya-final-mock"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+# After deploy, put the workers.dev URL in submission.json as mock_url
+# (no trailing /v1 — the builder appends /v1/<tool> from the openapi paths).

@@ -1,0 +1,12 @@
+{
+  "team": "bob-the-builder",
+  "members": [
+    {"name": "Hadi Hassan", "email": "hadihassan04@gmail.com"}
+  ],
+  "repo": "https://github.com/hadihassan04/build-the-builder",
+  "commit": "REPLACE_WITH_git_rev_parse_HEAD",
+  "run_command": "python3 builder/build.py {case_folder} {mock_url}",
+  "workflow": "submission/final.workflow.json",
+  "trace": "traces/final.log",
+  "mock_url": "https://YOUR-SUBDOMAIN.workers.dev"
+}
