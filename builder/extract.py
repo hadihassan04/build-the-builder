@@ -27,9 +27,9 @@ def _looks_like_brief_ab(paths: List[Path]) -> bool:
     )
 
 
-def load_hand_policy(openapi_path: Path, *, base_url: str | None = None) -> Dict[str, Any]:
+def load_hand_policy(openapi_path: Path) -> Dict[str, Any]:
     policy = json.loads(HAND_POLICY.read_text())
-    policy["tools"] = parse_openapi(openapi_path, base_url=base_url)
+    policy["tools"] = parse_openapi(openapi_path)
     return policy
 
 
@@ -106,7 +106,6 @@ def extract_policy(
     openapi_path: str | Path | None = None,
     *,
     force_hand: bool = False,
-    base_url: str | None = None,
 ) -> Dict[str, Any]:
     paths = [Path(p) for p in brief_paths]
     openapi_path = Path(openapi_path or ROOT / "tools/openapi.json")
@@ -117,8 +116,8 @@ def extract_policy(
         os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OPENAI_API_KEY")
     ):
         # Double-load the hand policy and require the two copies to match.
-        first = load_hand_policy(openapi_path, base_url=base_url)
-        second = load_hand_policy(openapi_path, base_url=base_url)
+        first = load_hand_policy(openapi_path)
+        second = load_hand_policy(openapi_path)
         if json.dumps(first, sort_keys=True) != json.dumps(second, sort_keys=True):
             raise ValueError("double extract disagreed")
         policy = first
@@ -131,10 +130,10 @@ def extract_policy(
 
     llm = _llm_extract([c for c in chunks if c.get("active", True)], "default")
     if llm is None:
-        policy = load_hand_policy(openapi_path, base_url=base_url)
+        policy = load_hand_policy(openapi_path)
         policy["brief_ids"] = [p.stem for p in paths]
         return policy
-    llm["tools"] = parse_openapi(openapi_path, base_url=base_url)
+    llm["tools"] = parse_openapi(openapi_path)
     llm["source_chunks"] = chunks
     errs = validate_policy(llm)
     if errs:

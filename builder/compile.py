@@ -313,13 +313,8 @@ def _strip_nulls(obj: Any) -> Any:
     return obj
 
 
-def compile_workflow(
-    policy: Dict[str, Any],
-    openapi_path: str | Path,
-    *,
-    base_url: str | None = None,
-) -> Dict[str, Any]:
-    tools_ir = parse_openapi(openapi_path, base_url=base_url)
+def compile_workflow(policy: Dict[str, Any], openapi_path: str | Path) -> Dict[str, Any]:
+    tools_ir = parse_openapi(openapi_path)
     policy = copy.deepcopy(policy)
     policy["tools"] = tools_ir
 

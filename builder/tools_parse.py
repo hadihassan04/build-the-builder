@@ -6,21 +6,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
-def normalize_mock_base(url: str | None) -> str:
-    """Turn a Workers root or …/v1 URL into the openapi server base (…/v1)."""
-    if not url:
-        return ""
-    base = url.strip().rstrip("/")
-    if not base.endswith("/v1"):
-        base = base + "/v1"
-    return base
-
-
-def parse_openapi(path: str | Path, *, base_url: str | None = None) -> Dict[str, Any]:
+def parse_openapi(path: str | Path) -> Dict[str, Any]:
     data = json.loads(Path(path).read_text())
     servers = data.get("servers") or []
-    discovered = (servers[0].get("url") if servers else "").rstrip("/")
-    base = normalize_mock_base(base_url) if base_url else discovered
+    base_url = (servers[0].get("url") if servers else "").rstrip("/")
     by_name: Dict[str, Any] = {}
     for path_key, methods in (data.get("paths") or {}).items():
         for method, op in (methods or {}).items():
@@ -50,14 +39,14 @@ def parse_openapi(path: str | Path, *, base_url: str | None = None) -> Dict[str,
                 "name": name,
                 "method": method.upper(),
                 "path": path_key,
-                "url": base + path_key,
+                "url": base_url + path_key,
                 "summary": op.get("summary") or "",
                 "fields": fields,
                 "required": required,
                 "response_properties": (resp_schema.get("properties") or {}),
             }
     return {
-        "base_url": base,
+        "base_url": base_url,
         "names": sorted(by_name.keys()),
         "by_name": by_name,
     }
