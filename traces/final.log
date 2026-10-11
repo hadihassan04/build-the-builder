@@ -1,16 +1,16 @@
-{"event": "start", "time": "2026-10-11T21:39:08+0200"}
+{"event": "start", "time": "2026-10-11T21:48:26+0200"}
 {"event": "case", "folder": "/private/tmp/claude-501/-Users-hadi-Downloads-build-the-builder/d78270d4-738d-452e-af09-4cbc40be81bc/scratchpad/finalcase/Build the Builder - Final Case", "mock_url": "https://freya-final-mock.freya-bank-mock.workers.dev"}
 {"event": "ingest", "files": ["BRIEF.md", "cloudflare-mock/README.md", "cloudflare-mock/example/example-response.json", "cloudflare-mock/example/worker.js", "cloudflare-mock/example/wrangler.toml", "sources/documents/2025-08-14-cards-faq.md", "sources/documents/2026-09-10-ivr-prompt-sheet.md", "sources/documents/2026-10-01-service-contract.md", "sources/emails/2026-09-24-kickoff-questions.txt", "sources/emails/2026-10-09-decisions-recap.txt", "sources/emails/attachments/2026-09-02-statement-debt-analysis.md", "sources/meetings/2026-10-07-analysis-session-transcript.txt", "statement-debt-call-flow.pdf", "test-environment/test-customers.json", "test-environment/test-customers.md"], "brief": "BRIEF.md", "contract": "sources/documents/2026-10-01-service-contract.md", "test_data": "/private/tmp/claude-501/-Users-hadi-Downloads-build-the-builder/d78270d4-738d-452e-af09-4cbc40be81bc/scratchpad/finalcase/Build the Builder - Final Case/test-environment/test-customers.json"}
 {"event": "contract", "services": ["cards.list", "cards.balance", "statement.week.get", "statement.week.decide", "statement.week.change", "contact.email.get", "statement.pdf.send"], "base_url": "https://api.freyabank.example/voice/v1"}
 {"event": "mock_generated", "path": "mock/src/index.js", "bytes": 351293, "services": ["cards.list", "cards.balance", "statement.week.get", "statement.week.decide", "statement.week.change", "contact.email.get", "statement.pdf.send"]}
-{"event": "test", "name": "mock_exact_match", "passed": true, "summary": "mock tests: 661/661 passed (617 leaves + 44 extra cases, 45 ms)"}
+{"event": "test", "name": "mock_exact_match", "passed": true, "summary": "mock tests: 661/661 passed (617 leaves + 44 extra cases, 53 ms)"}
 {"event": "test", "name": "mock_health", "passed": true, "health": {"ok": true, "services": ["cards.list", "cards.balance", "statement.week.get", "statement.week.decide", "statement.week.change", "contact.email.get", "statement.pdf.send"], "customers": 34}}
 {"event": "policy_reused", "path": "out/final.policy.json", "note": "extraction skipped; policy from an earlier run of this builder on the same folder"}
 {"event": "policy", "path": "/Users/hadi/Downloads/build-the-builder/out/final.policy.json", "valid": true, "errors": []}
 {"event": "compiled", "path": "/Users/hadi/Downloads/build-the-builder/out/final.workflow.json", "nodes": 25, "lint_ok": true, "lint": []}
 {"event": "test", "name": "offline_case_tests", "passed": true, "summary": "offline case tests: 86/86 passed"}
 {"event": "freya", "action": "validate_workflow", "ok": true, "detail": "{'valid': True, 'dryRun': True}"}
-{"event": "freya", "action": "save_workflow", "slot": "final", "workflow_id": "e4342bdf-6e9c-4dcd-a862-7b5f7004a24f", "agent_id": "ad01d55e-2d20-4c7a-ae37-0f87ddefb7ca", "version": 8}
-{"event": "freya", "action": "harden", "temperature": 0.2, "guardrails_present": true, "version": 8}
+{"event": "freya", "action": "save_workflow", "slot": "final", "workflow_id": "e4342bdf-6e9c-4dcd-a862-7b5f7004a24f", "agent_id": "ad01d55e-2d20-4c7a-ae37-0f87ddefb7ca", "version": 11}
+{"event": "freya", "action": "harden", "temperature": 0.2, "guardrails_present": true, "version": 11}
 {"event": "freya", "action": "export_workflow", "path": "/Users/hadi/Downloads/build-the-builder/submission/final.workflow.json"}
-{"event": "end", "time": "2026-10-11T21:39:17+0200", "workflow_id": "e4342bdf-6e9c-4dcd-a862-7b5f7004a24f", "agent_id": "ad01d55e-2d20-4c7a-ae37-0f87ddefb7ca", "seconds": 8.5}
+{"event": "end", "time": "2026-10-11T21:48:34+0200", "workflow_id": "e4342bdf-6e9c-4dcd-a862-7b5f7004a24f", "agent_id": "ad01d55e-2d20-4c7a-ae37-0f87ddefb7ca", "seconds": 7.7}

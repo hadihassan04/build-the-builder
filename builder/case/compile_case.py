@@ -123,7 +123,7 @@ def _extraction(lang: str) -> List[Dict[str, Any]]:
          "description": (
              "What the caller did in THIS turn. answer = named a card / gave digits / picked a week / gave a direct answer to the question; "
              "yes = clear agreement (evet, olur, onaylıyorum, tamam, gönder, lütfen); no = clear refusal or 'nothing else / thanks / bye'; "
-             "repeat = asked to hear it again; wants_agent = asked for a human/agent/representative; wants_pay = wants to pay or asks how/where to pay; "
+             "repeat = asked to hear it again; wants_agent = asked for a human/agent/representative; wants_pay = explicitly wants to make a payment or asks how/where to pay (not merely asking to learn the debt or balance); "
              "dispute = says a payment is missing or an amount is wrong; complaint = angry, insulting or complaining about the bank; "
              "out_of_scope = asked something unrelated to this card's statement debt, statement date change or e-mail (limits, loans, branch hours, blocking a card...); "
              "other_language = spoke a language other than the call language; silence = said nothing meaningful (empty, whitespace, punctuation-only, noise, only filler; a literal '...' is always silence); "
@@ -344,6 +344,7 @@ vars['route'] = 'go'
             "Open with one brief, neutral greeting in the call language and ask how you can help. "
             "Then listen for the caller's first request and classify it. "
             "If the caller asks for a human representative, set customer_intent to wants_agent immediately. "
+            "A request to learn a card's debt, balance, or statement is an answer request, not a payment request. "
             "Otherwise capture any card name or digits they already provided so the bank lookup can continue. "
             "Do not read account data in this turn."
         ),
@@ -357,7 +358,9 @@ vars['route'] = 'go'
         "pre_actions": [],
         "extraction_schema": _extraction(lang),
         "interruptible": True,
-        "max_node_turns": 1,
+        # The opening LLM turn is followed by the caller's first turn. Allow
+        # both so extraction can run before the dispatch transition fires.
+        "max_node_turns": 2,
         "max_turn_transition": "dispatch",
         "response_mapping": [],
         "truncation_strategy": "keep_all",
