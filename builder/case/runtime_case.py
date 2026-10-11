@@ -517,6 +517,7 @@ def render_debt(vars, data):
     rf = (POL.get("response_fields") or {}).get("balance") or {}
     ro = POL.get("readout") or {}
     card = obj(vars, "sel_card") or {}
+    vars["has_credit_balance"] = "no"
     name = str(card.get("name") or "")
     last4s = digits_spoken(card.get("last4"))
     stmt = str(data.get(rf.get("statement_date") or "statementDate") or "")
@@ -571,11 +572,15 @@ def render_debt(vars, data):
         sentences.append(s)
     if not any_debt:
         dom = dom_cur or (currency_list()[0] if currency_list() else {"spoken": ""})
-        total_txt = amount_spoken(total_dom if (total_dom is not None and total_dom > 0) else 0.0, dom)
+        # the total is read exactly as the service returned it (a negative value is spoken signed, never rounded to zero)
+        total_txt = amount_spoken(total_dom if total_dom is not None else 0.0, dom)
         if not stmt and fill("no_statement_yet"):
             text = fill("no_statement_yet", last4_spoken=last4s, card_name=name, total_debt=total_txt)
         else:
             text = fill("no_statement_debt", last4_spoken=last4s, card_name=name, statement_date=date_spoken(stmt), total_debt=total_txt, due_date=date_spoken(due))
+        if total_dom is not None and total_dom < 0 and fill("credit_balance"):
+            vars["has_credit_balance"] = "yes"
+            text = text + " " + fill("credit_balance", amount=amount_spoken(abs(total_dom), dom))
         vars["debt_tts"] = text
         vars["had_statement_debt"] = "no"
         return text

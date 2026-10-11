@@ -20,7 +20,7 @@
     "service_error_transfer", "payment_transfer", "dispute_transfer", "agent_transfer", "to_menu",
     "failed_attempts_exit", "silence_exit", "other_language_exit", "out_of_scope_ask", "checking"
   ],
-  "phrases_optional": ["ask_which_card_short", "auto_payment", "no_statement_yet", "document_unavailable", "cycle_already_used", "third_party_exit", "ask_clear_yes", "cycle_current_shared", "cycle_no_change_needed", "cycle_option_invalid", "email_other_address", "only_last_statement", "ask_week_short", "calm_reply_hint"],
+  "phrases_optional": ["credit_balance", "ask_which_card_short", "auto_payment", "no_statement_yet", "document_unavailable", "cycle_already_used", "third_party_exit", "ask_clear_yes", "cycle_current_shared", "cycle_no_change_needed", "cycle_option_invalid", "email_other_address", "only_last_statement", "ask_week_short", "calm_reply_hint"],
   "placeholders": {
     "ask_which_card": ["example1", "example2"],
     "ask_last4": ["card_name"],
@@ -34,6 +34,7 @@
     "fx_debt": ["currency", "statement_debt", "remaining_debt", "min_payment"],
     "no_debt_currencies": ["currency_list"],
     "auto_payment": ["amount"],
+    "credit_balance": ["amount"],
     "due_date": ["due_date"],
     "no_statement_debt": ["last4_spoken", "card_name", "statement_date", "total_debt", "due_date"],
     "no_statement_yet": ["last4_spoken", "card_name", "total_debt"],

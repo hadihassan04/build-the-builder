@@ -114,9 +114,14 @@ class Engine:
                 if node.get("passthrough"):
                     cur = self._next(node)
                     continue
-                if not turns:
+                if not turns and node["name"] == "initial_listen":
+                    # Preserve the old setup shorthand: no explicit opening
+                    # answer means the caller wants the statement flow.
+                    t = {"customer_intent": "answer"}
+                elif not turns:
                     return  # waiting for the caller
-                t = turns.pop(0)
+                else:
+                    t = turns.pop(0)
                 if oe.get("type") == "llm":
                     self.spoken.append("[llm:" + node["name"] + "] " + self._sub(node.get("task_message", "")[:60], self.vars))
                 for k, v in t.items():
@@ -353,7 +358,7 @@ def main() -> int:
     if neg:
         e = debt_for(*neg)
         t = e.vars.get("debt_tts", "")
-        check("negative balance -> no-debt wording, no 'eksi' amount", ("eksi" not in t and "minus" not in t) and e.vars.get("had_statement_debt") == "no", t[:200])
+        check("negative balance -> no-debt wording, total read as the service returned it (signed), not rounded to zero", e.vars.get("had_statement_debt") == "no" and ("eksi" in t or "minus" in t) and (" sıfır " not in t), t[:220])
     # missing block
     miss = None
     for c in test_data["customers"]:

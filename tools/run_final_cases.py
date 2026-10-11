@@ -305,6 +305,22 @@ SCENARIOS = [
             "The agent did not transfer, did not go to the menu and did not guess a card.",
         ],
     },
+    {
+        "id": "S15",
+        "title": "debt and e-mail asked in one sentence",
+        "customerNumber": "93261864",
+        "script": (
+            "You have several cards. When the assistant asks which card, answer in ONE sentence that you want the debt of your "
+            "'Yıldız Miles' card AND that you want the statement sent to your e-mail: say 'Yıldız Miles kartımın borcunu "
+            "öğrenmek istiyorum, bir de ekstremi e-postama gönderin.' If asked about another card, say 'hayır'. "
+            "When the assistant reads your registered e-mail address and asks whether to send, say 'evet'. Then say 'tamam'."
+        ),
+        "criteria": [
+            "The agent read the statement debt of the card ending 7101 (statement debt 7600 lira, remaining 4200 lira, minimum paid) with the due date last.",
+            "Without first asking the general 'what else can I do' offer, the agent asked permission to send the statement to the registered address m.ozkaratepe-1987.k@ornekposta.example (possibly spoken in a shortened or spelled form) and only after 'evet' said 'Ekstreniz kayıtlı e-posta adresinize gönderildi.'",
+            "The agent never asked for an e-mail address and never read more than the last four digits of a card.",
+        ],
+    },
 ]
 
 

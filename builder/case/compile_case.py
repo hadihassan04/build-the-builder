@@ -126,7 +126,7 @@ def _extraction(lang: str) -> List[Dict[str, Any]]:
              "repeat = asked to hear it again; wants_agent = asked for a human/agent/representative; wants_pay = wants to pay or asks how/where to pay; "
              "dispute = says a payment is missing or an amount is wrong; complaint = angry, insulting or complaining about the bank; "
              "out_of_scope = asked something unrelated to this card's statement debt, statement date change or e-mail (limits, loans, branch hours, blocking a card...); "
-             "other_language = spoke a language other than the call language; silence = said nothing meaningful (empty, noise, only filler); "
+             "other_language = spoke a language other than the call language; silence = said nothing meaningful (empty, whitespace, punctuation-only, noise, only filler; a literal '...' is always silence); "
              "third_party = says they are calling for someone else / not the card holder; wants_email = wants the statement by e-mail; "
              "wants_change = wants to change the statement date/week; another_card = wants another card's debt; "
              "all_accounts = asked for all cards at once; unclear = hedging like maybe / I think / not sure, or cannot tell."
@@ -322,15 +322,51 @@ def compile_case(policy: Dict[str, Any], services_ir: Dict[str, Any], mock_url: 
     nodes["setup"] = _code_node("setup", _driver(policy, f"""
 vars['customer_id'] = str(vars.get({json.dumps(cust_var)}) or vars.get('customer_id') or '')
 vars['now'] = str(vars.get({json.dumps(now_var)}) or vars.get('now') or '')
-for k in ('route','stage','question_tts','question_short','last_tts','exit_tts','debt_tts','cards_json','cards_read_json','sel_number','sel_last4','sel_name','sel_last4_spoken','cand_json','email','stmt_date_raw','req_week','cur_day','resume_stage','resume_question'):
+for k in ('route','stage','question_tts','question_short','last_tts','exit_tts','debt_tts','cards_json','cards_read_json','sel_number','sel_last4','sel_name','sel_last4_spoken','cand_json','email','stmt_date_raw','req_week','cur_day','resume_stage','resume_question','initial_intent','initial_card_name','initial_digits','pending_intent'):
     vars[k] = ''
 vars['disamb_level'] = '0'
 for k in ('attempts','silences','complaints'):
     vars[k] = '0'
 vars['email_ok'] = 'unknown'
 vars['change_ok'] = 'yes'
+vars['has_credit_balance'] = 'no'
+vars['stage'] = 'initial'
 vars['route'] = 'go'
-"""), [], "fetch_list")
+"""), [], "initial_listen")
+
+    # Hear the opening request before any account data is fetched. This lets
+    # a caller asking for a representative transfer immediately, while still
+    # allowing the normal statement flow to continue after the first turn.
+    nodes["initial_listen"] = {
+        "name": "initial_listen",
+        "node_type": "conversation",
+        "task_message": (
+            "Open with one brief, neutral greeting in the call language and ask how you can help. "
+            "Then listen for the caller's first request and classify it. "
+            "If the caller asks for a human representative, set customer_intent to wants_agent immediately. "
+            "Otherwise capture any card name or digits they already provided so the bank lookup can continue. "
+            "Do not read account data in this turn."
+        ),
+        "role_message": "",
+        "on_enter": {"type": "llm"},
+        "on_enter_first_entry_only": True,
+        "tools": [],
+        "transitions": [_always("dispatch")],
+        "assertions": [],
+        "passthrough": False,
+        "pre_actions": [],
+        "extraction_schema": _extraction(lang),
+        "interruptible": True,
+        "max_node_turns": 1,
+        "max_turn_transition": "dispatch",
+        "response_mapping": [],
+        "truncation_strategy": "keep_all",
+        "suppress_tool_results": True,
+        "truncation_window_size": 10,
+        "disable_inactivity_monitor": False,
+        "return_to_previous_on_interrupt": False,
+        "position": {"x": 0, "y": 0},
+    }
 
     # ---- list accounts
     nodes["fetch_list"] = _api_node("fetch_list", url("list_accounts"), _req_fields(policy, svc("list_accounts"), services_ir), env_extra, "after_list",
@@ -360,8 +396,19 @@ else:
     if len(cards) == 1:
         select_card(vars, cards[0])
         vars['route'] = 'selected'
+    elif sget(vars, 'stage') == 'initial' and (sget(vars, 'initial_card_name') or sget(vars, 'initial_digits')):
+        initial_name = str(sget(vars, 'initial_card_name'))
+        initial_digits = re.sub(r'\D', '', str(sget(vars, 'initial_digits')))
+        r = resolve_card_answer(vars, initial_name, initial_digits)
+        if r == 'selected':
+            vars['route'] = 'selected'
+        elif r == 'ask_again':
+            vars['route'] = 'ask'
+        else:
+            ask_card_question(vars, cards)
+            vars['route'] = 'ask'
     else:
-        vars['attempts'] = '0'
+        vars['attempts'] = '1' if sget(vars, 'initial_intent') == 'all_accounts' else '0'
         vars['silences'] = '0'
         ask_card_question(vars, cards)
         vars['route'] = 'ask'
@@ -375,6 +422,8 @@ else:
         "task_message": (
             "The system just asked: {{question_tts}}\n"
             "Listen to the caller's answer. Do not call tools. Do not answer yourself; the system decides the next step. "
+            "A literal '...' or any empty/punctuation-only turn is silence: return customer_intent=silence immediately. "
+            "Never wait for another turn or leave the caller without an extraction result. "
             "If you must say something, say only a very short acknowledgement in the call language."
         ),
         "role_message": "",
@@ -424,6 +473,13 @@ max_att = limit('attempts_per_question', 3)
 max_sil = limit('silence_repeats_before_end', 2)
 max_cmp = limit('complaint_replies_before_transfer', 3)
 
+if stage == 'initial':
+    vars['initial_intent'] = intent
+    vars['initial_card_name'] = card_name
+    vars['initial_digits'] = digits
+    if intent in ('wants_email', 'wants_change'):
+        vars['pending_intent'] = intent
+
 def fail_attempt():
     vars['attempts'] = str(iget(vars, 'attempts') + 1)
     if iget(vars, 'attempts') >= max_att:
@@ -452,14 +508,14 @@ elif intent == 'complaint':
     else:
         vars['calm_hint'] = fill('calm_reply_hint')
         vars['route'] = 'calm'
-elif intent == 'silence':
+elif intent == 'silence' and stage != 'initial':
     vars['silences'] = str(iget(vars, 'silences') + 1)
     if iget(vars, 'silences') > max_sil:
         say_exit(vars, fill('silence_exit'), 'silence')
     else:
         vars['question_tts'] = str(sget(vars, 'question_short')) or str(sget(vars, 'question_tts'))
         reask()
-elif intent == 'repeat':
+elif intent == 'repeat' and stage != 'initial':
     vars['question_tts'] = str(sget(vars, 'last_tts')) or str(sget(vars, 'question_tts'))
     reask()
 elif intent == 'out_of_scope' and stage != 'oos':
@@ -470,23 +526,35 @@ elif intent == 'out_of_scope' and stage != 'oos':
     set_question(vars, 'oos', fill('out_of_scope_ask'))
     reask()
 # ---- stage logic
+elif stage == 'initial':
+    # Fetch the account list only after the opening request has been heard.
+    if intent == 'all_accounts':
+        vars['attempts'] = '1'
+    vars['route'] = 'load_list'
 elif stage == 'oos':
     if intent == 'yes':
         say_exit(vars, fill('to_menu'), 'menu')
     elif intent in ('no', 'answer', 'another_card', 'wants_email', 'wants_change'):
         vars['attempts'] = '0'
-        set_question(vars, str(sget(vars, 'resume_stage')), str(sget(vars, 'resume_question')), str(sget(vars, 'resume_short')))
-        reask()
+        if sget(vars, 'resume_stage') == 'initial':
+            # There was no active question yet. Resume by loading the cards;
+            # after that the normal card-selection question is constructed.
+            vars['route'] = 'load_list'
+        else:
+            set_question(vars, str(sget(vars, 'resume_stage')), str(sget(vars, 'resume_question')), str(sget(vars, 'resume_short')))
+            reask()
     else:
         if not fail_attempt():
             reask()
 elif stage == 'choose_card':
     cards = remaining_cards(vars)
+    if intent in ('wants_email', 'wants_change') and (card_name or digits):
+        vars['pending_intent'] = intent   # debt + follow-up asked in one sentence: read the debt, then go straight there
     if intent == 'all_accounts' or (intent == 'answer' and not card_name and not digits):
         if not fail_attempt():
             ask_card_question(vars, cards)
             reask()
-    elif intent in ('answer', 'yes', 'no', 'unclear', 'another_card') and (card_name or digits):
+    elif card_name or digits:
         r = resolve_card_answer(vars, card_name, digits)
         if r == 'selected':
             vars['route'] = 'selected'
@@ -523,7 +591,8 @@ elif stage == 'another':
         else:
             vars['route'] = 'offer'
     elif intent in ('no', 'wants_email', 'wants_change'):
-        vars['pending_intent'] = intent
+        if intent != 'no':
+            vars['pending_intent'] = intent
         vars['route'] = 'offer'
     else:
         if not fail_attempt():
@@ -597,6 +666,7 @@ else:
 """
     nodes["dispatch"] = _code_node("dispatch", _driver(policy, dispatch_body), [
         _route("end", "exit"), _route("speak_q", "ask"), _route("calm", "calm"), _route("speak_checking", "selected"),
+        _route("fetch_list", "load_list"),
         _route("fetch_contact", "offer"), _route("email_start", "email"), _route("send_pdf", "send"),
         _route("fetch_cycle", "cycle"), _route("fetch_preview", "preview"), _route("do_change", "change"),
     ], "end")
@@ -639,7 +709,7 @@ vars['silences'] = '0'
 if left:
     set_question(vars, 'another', fill('another_card'))
     vars['route'] = 'ask'
-elif sget(vars, 'had_statement_debt') == 'no' and not {offer_after_no_debt}:
+elif sget(vars, 'had_statement_debt') == 'no' and sget(vars, 'has_credit_balance') != 'yes' and not {offer_after_no_debt}:
     say_exit(vars, fill('to_menu'), 'menu')
 else:
     vars['route'] = 'offer'
@@ -668,7 +738,7 @@ elif email and '@' in email:
     vars['email_ok'] = 'yes'
 else:
     vars['email_ok'] = 'no'
-if sget(vars, 'had_statement_debt') == 'no' and not {offer_after_no_debt}:
+if sget(vars, 'had_statement_debt') == 'no' and sget(vars, 'has_credit_balance') != 'yes' and not {offer_after_no_debt}:
     say_exit(vars, fill('to_menu'), 'menu')
 else:
     pend = str(sget(vars, 'pending_intent'))

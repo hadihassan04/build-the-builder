@@ -112,7 +112,7 @@ tl_unpaid / tl_min_paid / tl_partial (domestic currency sentences for: nothing p
 minimum paid; {{currency}} is the spoken currency name and amounts are already spoken amounts); fx_debt (foreign currency
 sentence); no_debt_currencies (one sentence listing currencies without debt); auto_payment (remaining automatic payment);
 due_date / due_today; no_statement_debt (card has no statement debt: total debt incl. future periods and due date);
-no_statement_yet (no statement issued yet); offer_both / offer_change_only / offer_email_only (follow-up offer variants);
+no_statement_yet (no statement issued yet); credit_balance (optional: the card has a credit / negative total balance of {{amount}} in the caller's favour); offer_both / offer_change_only / offer_email_only (follow-up offer variants);
 email_confirm (read registered address, ask to send); email_sent; no_email (no registered address); document_unavailable;
 cycle_current (current statement week and next dates, then ask whether to change); cycle_current_shared (same for a
 shared statement); cycle_options ({{options}} = allowed weeks as ordinal words); cycle_shared_impact (disclosure that the
